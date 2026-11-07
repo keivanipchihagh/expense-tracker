@@ -1,6 +1,8 @@
 package http
 
 import (
+	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -114,6 +116,55 @@ func TestMaxBodyBytesMiddleware(t *testing.T) {
 				return
 			}
 			require.NoError(t, readErr)
+		})
+	}
+}
+
+func TestBearerAuthMiddleware(t *testing.T) {
+	const metadata = "https://expenses.example.com/.well-known/oauth-protected-resource"
+	validate := func(_ context.Context, token string) (bool, error) {
+		switch token {
+		case "good":
+			return true, nil
+		case "broken":
+			return false, errors.New("db down")
+		}
+		return false, nil
+	}
+	isPublic := func(path string) bool { return path == "/health" }
+	mw := BearerAuthMiddleware(validate, isPublic, metadata)
+
+	tests := []struct {
+		name          string
+		path          string
+		authorization string
+		wantStatus    int
+		wantChallenge string
+	}{
+		{name: "public path without token", path: "/health", wantStatus: http.StatusOK},
+		{name: "valid token", path: "/api", authorization: "Bearer good", wantStatus: http.StatusOK},
+		{name: "scheme is case-insensitive", path: "/api", authorization: "bearer good", wantStatus: http.StatusOK},
+		{name: "missing header", path: "/api", wantStatus: http.StatusUnauthorized, wantChallenge: `Bearer resource_metadata="` + metadata + `"`},
+		{name: "wrong scheme", path: "/api", authorization: "Basic Z29vZA==", wantStatus: http.StatusUnauthorized, wantChallenge: `Bearer resource_metadata="` + metadata + `"`},
+		{name: "empty token", path: "/api", authorization: "Bearer ", wantStatus: http.StatusUnauthorized, wantChallenge: `Bearer resource_metadata="` + metadata + `"`},
+		{name: "invalid token", path: "/api", authorization: "Bearer bad", wantStatus: http.StatusUnauthorized, wantChallenge: `Bearer resource_metadata="` + metadata + `", error="invalid_token"`},
+		{name: "validator error", path: "/api", authorization: "Bearer broken", wantStatus: http.StatusInternalServerError},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
+			if tt.authorization != "" {
+				req.Header.Set("Authorization", tt.authorization)
+			}
+			rec := httptest.NewRecorder()
+			mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})).ServeHTTP(rec, req)
+
+			assert.Equal(t, tt.wantStatus, rec.Code)
+			assert.Equal(t, tt.wantChallenge, rec.Header().Get("WWW-Authenticate"))
+			if tt.wantStatus == http.StatusUnauthorized {
+				assert.JSONEq(t, unauthorizedBody, rec.Body.String())
+			}
 		})
 	}
 }

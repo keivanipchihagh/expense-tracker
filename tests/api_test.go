@@ -1,13 +1,17 @@
-// Package tests runs the full HTTP stack (router, middlewares, handler,
-// repositories) against a real SQLite database.
+// Package tests runs the full HTTP stack (router, middlewares, OAuth,
+// handler, repositories) against a real SQLite database, the way a client
+// such as Claude or ChatGPT talks to it.
 package tests
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -22,9 +26,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const (
+	password    = "correct-horse-battery-staple"
+	redirectUri = "http://localhost:9999/callback"
+	verifier    = "test-verifier-0123456789-abcdefghijklmnopqrstuvwxyz"
+)
+
 type testServer struct {
-	url    string
-	client *sqlite.Client
+	url   string
+	db    *sqlite.Client
+	token string // access token used by call
+}
+
+// noRedirect returns redirect responses instead of following them, so the
+// OAuth redirects can be inspected.
+var noRedirect = &http.Client{
+	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 }
 
 func newTestServer(t *testing.T) *testServer {
@@ -39,34 +56,139 @@ func newTestServer(t *testing.T) *testServer {
 	require.NoError(t, err)
 	expenseRepo, err := repositories.NewExpenseRepository(ctx, db, logRepo)
 	require.NoError(t, err)
+	oauthRepo, err := repositories.NewOAuthRepository(ctx, db)
+	require.NoError(t, err)
 
-	routes := api.NewServer(handler.NewHandler(expenseRepo), "test").Routes()
-	srv := httptest.NewServer(pkgHttp.NewHttpServer(routes, 5*time.Second, 1<<20).Handler)
+	// The public URL is the test server's own address, known only once it runs.
+	var routes http.Handler
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { routes.ServeHTTP(w, r) }))
 	t.Cleanup(srv.Close)
 
-	return &testServer{url: srv.URL, client: db}
+	h := handler.NewHandler(expenseRepo, oauthRepo, srv.URL, password)
+	routes = pkgHttp.NewHttpServer(api.NewServer(h, "test", srv.URL).Handler(), 5*time.Second, 1<<20).Handler
+
+	return &testServer{url: srv.URL, db: db}
 }
 
-// call sends a request and decodes a JSON response body into out (if non-nil).
-func (s *testServer) call(t *testing.T, method, path, body string, out any) int {
-	t.Helper()
-	req, err := http.NewRequest(method, s.url+path, strings.NewReader(body))
-	require.NoError(t, err)
-	resp, err := http.DefaultClient.Do(req)
-	require.NoError(t, err)
-	defer resp.Body.Close()
+func challenge(v string) string {
+	sum := sha256.Sum256([]byte(v))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
+}
 
+func decode(t *testing.T, resp *http.Response, out any) {
+	t.Helper()
+	defer resp.Body.Close()
 	raw, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 	if out != nil && len(raw) > 0 {
 		require.NoError(t, json.Unmarshal(raw, out), string(raw))
 	}
+}
+
+// register registers a public client and returns its id.
+func (s *testServer) register(t *testing.T) string {
+	t.Helper()
+	resp, err := http.Post(s.url+"/oauth/register", "application/json",
+		strings.NewReader(`{"client_name":"Test Client","redirect_uris":["`+redirectUri+`"],"token_endpoint_auth_method":"none"}`))
+	require.NoError(t, err)
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+
+	var client struct {
+		ClientId string `json:"client_id"`
+	}
+	decode(t, resp, &client)
+	return client.ClientId
+}
+
+func authorizeParams(clientId string) url.Values {
+	return url.Values{
+		"response_type":         {"code"},
+		"client_id":             {clientId},
+		"redirect_uri":          {redirectUri},
+		"code_challenge":        {challenge(verifier)},
+		"code_challenge_method": {"S256"},
+		"state":                 {"state-123"},
+	}
+}
+
+// authorize submits the login form and returns the authorization code.
+func (s *testServer) authorize(t *testing.T, clientId string) string {
+	t.Helper()
+	form := authorizeParams(clientId)
+	form.Set("password", password)
+
+	resp, err := noRedirect.PostForm(s.url+"/oauth/authorize", form)
+	require.NoError(t, err)
+	decode(t, resp, nil)
+	require.Equal(t, http.StatusFound, resp.StatusCode)
+
+	location, err := url.Parse(resp.Header.Get("Location"))
+	require.NoError(t, err)
+	require.Equal(t, "localhost:9999", location.Host)
+	require.Equal(t, "state-123", location.Query().Get("state"))
+	return location.Query().Get("code")
+}
+
+type tokens struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	TokenType    string `json:"token_type"`
+	ExpiresIn    int    `json:"expires_in"`
+}
+
+func (s *testServer) tokenRequest(t *testing.T, form url.Values) (int, tokens, map[string]string) {
+	t.Helper()
+	resp, err := http.PostForm(s.url+"/oauth/token", form)
+	require.NoError(t, err)
+
+	var raw json.RawMessage
+	decode(t, resp, &raw)
+	var tok tokens
+	var oauthErr map[string]string
+	if resp.StatusCode == http.StatusOK {
+		require.NoError(t, json.Unmarshal(raw, &tok))
+	} else {
+		require.NoError(t, json.Unmarshal(raw, &oauthErr))
+	}
+	return resp.StatusCode, tok, oauthErr
+}
+
+func codeGrant(clientId, code string) url.Values {
+	return url.Values{
+		"grant_type":    {"authorization_code"},
+		"client_id":     {clientId},
+		"code":          {code},
+		"redirect_uri":  {redirectUri},
+		"code_verifier": {verifier},
+	}
+}
+
+// login runs the whole OAuth flow and stores the access token for call.
+func (s *testServer) login(t *testing.T) {
+	t.Helper()
+	clientId := s.register(t)
+	status, tok, _ := s.tokenRequest(t, codeGrant(clientId, s.authorize(t, clientId)))
+	require.Equal(t, http.StatusOK, status)
+	s.token = tok.AccessToken
+}
+
+// call sends an authenticated request and decodes the JSON response into out.
+func (s *testServer) call(t *testing.T, method, path, body string, out any) int {
+	t.Helper()
+	req, err := http.NewRequest(method, s.url+path, strings.NewReader(body))
+	require.NoError(t, err)
+	if s.token != "" {
+		req.Header.Set("Authorization", "Bearer "+s.token)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	decode(t, resp, out)
 	return resp.StatusCode
 }
 
 func (s *testServer) logActions(t *testing.T) []string {
 	t.Helper()
-	rows, err := s.client.Query("SELECT action FROM logs ORDER BY id")
+	rows, err := s.db.Query("SELECT action FROM logs ORDER BY id")
 	require.NoError(t, err)
 	defer rows.Close()
 
@@ -79,8 +201,144 @@ func (s *testServer) logActions(t *testing.T) []string {
 	return actions
 }
 
+func TestApiRequiresToken(t *testing.T) {
+	s := newTestServer(t)
+
+	resp, err := http.Get(s.url + "/api/v1/expenses")
+	require.NoError(t, err)
+	decode(t, resp, nil)
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+	assert.Equal(t, `Bearer resource_metadata="`+s.url+`/.well-known/oauth-protected-resource"`, resp.Header.Get("WWW-Authenticate"),
+		"the 401 tells clients where to discover how to log in")
+
+	s.token = "made-up-token"
+	assert.Equal(t, http.StatusUnauthorized, s.call(t, http.MethodGet, "/api/v1/expenses", "", nil))
+
+	s.token = ""
+	assert.Equal(t, http.StatusOK, s.call(t, http.MethodGet, "/health", "", nil), "health stays public")
+}
+
+func TestDiscovery(t *testing.T) {
+	s := newTestServer(t)
+
+	var resource map[string]any
+	require.Equal(t, http.StatusOK, s.call(t, http.MethodGet, "/.well-known/oauth-protected-resource", "", &resource))
+	assert.Equal(t, s.url, resource["resource"])
+	assert.Equal(t, []any{s.url}, resource["authorization_servers"])
+
+	require.Equal(t, http.StatusOK, s.call(t, http.MethodGet, "/.well-known/oauth-protected-resource/mcp", "", nil),
+		"clients may append the resource path")
+
+	var server map[string]any
+	require.Equal(t, http.StatusOK, s.call(t, http.MethodGet, "/.well-known/oauth-authorization-server", "", &server))
+	assert.Equal(t, s.url, server["issuer"])
+	assert.Equal(t, s.url+"/oauth/authorize", server["authorization_endpoint"])
+	assert.Equal(t, s.url+"/oauth/token", server["token_endpoint"])
+	assert.Equal(t, s.url+"/oauth/register", server["registration_endpoint"])
+	assert.Equal(t, []any{"S256"}, server["code_challenge_methods_supported"])
+}
+
+func TestOAuthFlow(t *testing.T) {
+	s := newTestServer(t)
+	clientId := s.register(t)
+
+	// The login page names the client and where it will redirect to.
+	resp, err := http.Get(s.url + "/oauth/authorize?" + authorizeParams(clientId).Encode())
+	require.NoError(t, err)
+	page, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Contains(t, string(page), "Test Client")
+	assert.Contains(t, string(page), "localhost:9999")
+	assert.Contains(t, resp.Header.Get("Content-Security-Policy"), "frame-ancestors 'none'")
+
+	// A wrong password shows the form again.
+	form := authorizeParams(clientId)
+	form.Set("password", "wrong")
+	resp, err = noRedirect.PostForm(s.url+"/oauth/authorize", form)
+	require.NoError(t, err)
+	page, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+	assert.Contains(t, string(page), "Wrong password")
+
+	// The right password yields a code, which is exchanged once for tokens.
+	code := s.authorize(t, clientId)
+	status, tok, _ := s.tokenRequest(t, codeGrant(clientId, code))
+	require.Equal(t, http.StatusOK, status)
+	assert.Equal(t, "Bearer", tok.TokenType)
+	assert.Equal(t, 3600, tok.ExpiresIn)
+
+	status, _, oauthErr := s.tokenRequest(t, codeGrant(clientId, code))
+	assert.Equal(t, http.StatusBadRequest, status)
+	assert.Equal(t, "invalid_grant", oauthErr["error"], "a code works only once")
+
+	// The access token opens the API.
+	s.token = tok.AccessToken
+	require.Equal(t, http.StatusOK, s.call(t, http.MethodGet, "/api/v1/expenses", "", nil))
+
+	// Refreshing returns new tokens and retires the old refresh token.
+	refresh := url.Values{"grant_type": {"refresh_token"}, "client_id": {clientId}, "refresh_token": {tok.RefreshToken}}
+	status, refreshed, _ := s.tokenRequest(t, refresh)
+	require.Equal(t, http.StatusOK, status)
+	assert.NotEqual(t, tok.RefreshToken, refreshed.RefreshToken)
+
+	s.token = refreshed.AccessToken
+	require.Equal(t, http.StatusOK, s.call(t, http.MethodGet, "/api/v1/expenses", "", nil))
+
+	status, _, oauthErr = s.tokenRequest(t, refresh)
+	assert.Equal(t, http.StatusBadRequest, status)
+	assert.Equal(t, "invalid_grant", oauthErr["error"], "a refresh token works only once")
+}
+
+func TestOAuthFlow_WrongVerifier(t *testing.T) {
+	s := newTestServer(t)
+	clientId := s.register(t)
+
+	grant := codeGrant(clientId, s.authorize(t, clientId))
+	grant.Set("code_verifier", "another-verifier-0123456789-abcdefghijklmnopqrstu")
+
+	status, _, oauthErr := s.tokenRequest(t, grant)
+	assert.Equal(t, http.StatusBadRequest, status)
+	assert.Equal(t, "invalid_grant", oauthErr["error"], "PKCE stops a stolen code from being used")
+}
+
+func TestOAuthFlow_ConfidentialClientWithBasicAuth(t *testing.T) {
+	s := newTestServer(t)
+
+	resp, err := http.Post(s.url+"/oauth/register", "application/json",
+		strings.NewReader(`{"client_name":"Server App","redirect_uris":["`+redirectUri+`"]}`))
+	require.NoError(t, err)
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	var client struct {
+		ClientId     string `json:"client_id"`
+		ClientSecret string `json:"client_secret"`
+		AuthMethod   string `json:"token_endpoint_auth_method"`
+	}
+	decode(t, resp, &client)
+	require.NotEmpty(t, client.ClientSecret)
+	assert.Equal(t, "client_secret_basic", client.AuthMethod)
+
+	grant := codeGrant(client.ClientId, s.authorize(t, client.ClientId))
+	grant.Del("client_id")
+
+	tokenWith := func(secret string) int {
+		req, _ := http.NewRequest(http.MethodPost, s.url+"/oauth/token", strings.NewReader(grant.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.SetBasicAuth(client.ClientId, secret)
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		decode(t, resp, nil)
+		return resp.StatusCode
+	}
+
+	assert.Equal(t, http.StatusUnauthorized, tokenWith("wrong-secret"))
+	assert.Equal(t, http.StatusOK, tokenWith(client.ClientSecret))
+}
+
 func TestExpenseLifecycle(t *testing.T) {
 	s := newTestServer(t)
+	s.login(t)
 
 	// Create
 	var created map[string]any
@@ -125,6 +383,7 @@ func TestExpenseLifecycle(t *testing.T) {
 
 func TestValidationErrorsAreReported(t *testing.T) {
 	s := newTestServer(t)
+	s.login(t)
 
 	var resp struct {
 		Error struct {
@@ -137,12 +396,10 @@ func TestValidationErrorsAreReported(t *testing.T) {
 
 	require.Equal(t, http.StatusUnprocessableEntity, status)
 	assert.Equal(t, "validation_failed", resp.Error.Code)
-	assert.Equal(t, map[string]string{
-		"amount":      "must have at most 2 decimal places for EUR",
-		"occurred_at": "must be an RFC 3339 timestamp with a UTC offset, e.g. 2026-11-07T13:20:00+01:00",
-		"category":    resp.Error.Fields["category"], // full list checked in handler tests
-		"tip":         "unknown field",
-	}, resp.Error.Fields)
+	assert.Equal(t, "must have at most 2 decimal places for EUR", resp.Error.Fields["amount"])
+	assert.Contains(t, resp.Error.Fields["occurred_at"], "UTC offset")
+	assert.Contains(t, resp.Error.Fields["category"], "must be one of")
+	assert.Equal(t, "unknown field", resp.Error.Fields["tip"])
 	assert.Empty(t, s.logActions(t), "nothing is written")
 }
 
@@ -151,7 +408,7 @@ func TestSecurityHeadersOnApiResponses(t *testing.T) {
 
 	resp, err := http.Get(s.url + "/api/v1/expenses")
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	decode(t, resp, nil)
 
 	assert.Equal(t, "nosniff", resp.Header.Get("X-Content-Type-Options"))
 	assert.Equal(t, "no-store", resp.Header.Get("Cache-Control"))

@@ -2,21 +2,38 @@ package handler
 
 import (
 	"log/slog"
+	"strings"
+	"time"
 
 	"github.com/keivanipchihagh/expense-tracker/pkg/repositories"
 )
 
 type Handler struct {
 	expenseRepo repositories.ExpenseRepository
-	logger      *slog.Logger
+	oauthRepo   repositories.OAuthRepository
+	// publicUrl is the server's base URL, used as the OAuth issuer.
+	publicUrl string
+	// password unlocks the OAuth login page.
+	password string
+	logins   *loginLimiter
+	now      func() time.Time
+	logger   *slog.Logger
 }
 
-func NewHandler(expenseRepo repositories.ExpenseRepository) *Handler {
-	if expenseRepo == nil {
-		panic("handler: expense repository must not be nil")
+func NewHandler(expenseRepo repositories.ExpenseRepository, oauthRepo repositories.OAuthRepository, publicUrl, password string) *Handler {
+	if expenseRepo == nil || oauthRepo == nil {
+		panic("handler: repositories must not be nil")
+	}
+	if publicUrl == "" || password == "" {
+		panic("handler: public url and password must not be empty")
 	}
 	return &Handler{
 		expenseRepo: expenseRepo,
+		oauthRepo:   oauthRepo,
+		publicUrl:   strings.TrimSuffix(publicUrl, "/"),
+		password:    password,
+		logins:      newLoginLimiter(),
+		now:         time.Now,
 		logger:      slog.Default().With("module", "handler"),
 	}
 }

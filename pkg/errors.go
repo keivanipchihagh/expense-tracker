@@ -25,6 +25,23 @@ var (
 	ErrExpenseNotFound = &Error{Status: http.StatusNotFound, Code: "not_found", Message: "expense not found"}
 )
 
+// OAuthError is an OAuth 2.0 protocol error. The API sends it as
+// {"error": Code, "error_description": Description} (RFC 6749 section 5.2).
+type OAuthError struct {
+	Status      int
+	Code        string
+	Description string
+}
+
+func (e *OAuthError) Error() string {
+	return e.Code + ": " + e.Description
+}
+
+// NewOAuthError returns an OAuth error with the given status, code and description.
+func NewOAuthError(status int, code, description string) *OAuthError {
+	return &OAuthError{Status: status, Code: code, Description: description}
+}
+
 // NewValidationError returns a 422 error mapping each invalid field to the
 // reason it was rejected.
 func NewValidationError(fields map[string]string) *Error {

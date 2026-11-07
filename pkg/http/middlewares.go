@@ -4,11 +4,73 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 )
 
 // internalErrorBody is the response body sent when a handler panics.
 const internalErrorBody = `{"error":{"code":"internal","message":"internal server error"}}`
+
+// unauthorizedBody is the response body sent for a missing or invalid token.
+const unauthorizedBody = `{"error":{"code":"unauthorized","message":"missing or invalid access token"}}`
+
+// TokenValidator reports whether token is a valid access token. An error
+// means the check itself failed, not that the token is invalid.
+type TokenValidator func(ctx context.Context, token string) (bool, error)
+
+// BearerAuthMiddleware requires "Authorization: Bearer <token>" with a valid
+// token on every request whose path isPublic doesn't exempt. A rejection is a
+// 401 whose WWW-Authenticate header points at resourceMetadataUrl (RFC 9728);
+// that is how MCP clients find out where to log in.
+func BearerAuthMiddleware(validate TokenValidator, isPublic func(path string) bool, resourceMetadataUrl string) Middleware {
+	challenge := `Bearer resource_metadata="` + resourceMetadataUrl + `"`
+
+	return func(h http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if isPublic(r.URL.Path) {
+				h.ServeHTTP(w, r)
+				return
+			}
+
+			token, ok := bearerToken(r)
+			if !ok {
+				writeUnauthorized(w, challenge)
+				return
+			}
+			valid, err := validate(r.Context(), token)
+			if err != nil {
+				slog.ErrorContext(r.Context(), "access token check failed", "error", err)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(internalErrorBody))
+				return
+			}
+			if !valid {
+				writeUnauthorized(w, challenge+`, error="invalid_token"`)
+				return
+			}
+			h.ServeHTTP(w, r)
+		})
+	}
+}
+
+// bearerToken extracts the token from "Authorization: Bearer <token>". The
+// scheme is case-insensitive (RFC 7235).
+func bearerToken(r *http.Request) (string, bool) {
+	scheme, token, ok := strings.Cut(r.Header.Get("Authorization"), " ")
+	if !ok || !strings.EqualFold(scheme, "Bearer") {
+		return "", false
+	}
+	token = strings.TrimSpace(token)
+	return token, token != ""
+}
+
+func writeUnauthorized(w http.ResponseWriter, challenge string) {
+	w.Header().Set("WWW-Authenticate", challenge)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusUnauthorized)
+	_, _ = w.Write([]byte(unauthorizedBody))
+}
 
 // RecoverMiddleware turns a panic in a downstream handler into a logged
 // error and a 500 response instead of a dropped connection.
