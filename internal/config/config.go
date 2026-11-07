@@ -21,6 +21,9 @@ type Config struct {
 	HttpRequestTimeout time.Duration `envconfig:"HTTP_REQUEST_TIMEOUT" default:"30s"`
 	// HttpMaxBodyBytes caps the request body size. Zero disables it.
 	HttpMaxBodyBytes int64 `envconfig:"HTTP_MAX_BODY_BYTES" default:"1048576"`
+
+	// SqlitePath is the SQLite database file. Its directory must exist.
+	SqlitePath string `envconfig:"SQLITE_PATH" default:"data/expense.db"`
 }
 
 // NewConfig reads the service configuration from the environment.

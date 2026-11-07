@@ -1,5 +1,11 @@
 # syntax=docker/dockerfile:1
-FROM golang:1.27-alpine AS builder
+
+# The builder runs on the build machine's platform and cross-compiles for the
+# target, so multi-platform builds don't need emulation.
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS builder
+
+ARG TARGETOS
+ARG TARGETARCH
 
 WORKDIR /src
 
@@ -12,7 +18,8 @@ COPY . .
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/expense-tracker .
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
+    go build -trimpath -ldflags="-s -w" -o /out/expense-tracker .
 
 FROM gcr.io/distroless/static-debian13:nonroot
 

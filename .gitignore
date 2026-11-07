@@ -32,3 +32,6 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+# SQLite data (the folder itself is kept via data/.gitkeep)
+data/*
+!data/.gitkeep

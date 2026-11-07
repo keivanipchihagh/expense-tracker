@@ -15,6 +15,7 @@ func TestNewConfig(t *testing.T) {
 		HttpPort:           8000,
 		HttpRequestTimeout: 30 * time.Second,
 		HttpMaxBodyBytes:   1 << 20,
+		SqlitePath:         "data/expense.db",
 	}
 
 	tests := []struct {
@@ -36,6 +37,7 @@ func TestNewConfig(t *testing.T) {
 				"HTTP_PORT":            "9000",
 				"HTTP_REQUEST_TIMEOUT": "5s",
 				"HTTP_MAX_BODY_BYTES":  "2048",
+				"SQLITE_PATH":          "/data/expense.db",
 			},
 			want: Config{
 				AppVersion:         "v1.2.3",
@@ -43,6 +45,7 @@ func TestNewConfig(t *testing.T) {
 				HttpPort:           9000,
 				HttpRequestTimeout: 5 * time.Second,
 				HttpMaxBodyBytes:   2048,
+				SqlitePath:         "/data/expense.db",
 			},
 		},
 		{

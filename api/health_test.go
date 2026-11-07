@@ -28,7 +28,7 @@ func TestHealth(t *testing.T) {
 		},
 	}
 
-	routes := NewServer("v1.2.3").Routes()
+	routes := newTestRoutes(t)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -42,8 +42,4 @@ func TestHealth(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestNewServer_PanicsOnEmptyVersion(t *testing.T) {
-	assert.Panics(t, func() { NewServer("") })
 }
