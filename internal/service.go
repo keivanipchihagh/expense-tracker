@@ -47,9 +47,13 @@ func Run() {
 	if err != nil {
 		fatal("failed to initialize log repository", "error", err)
 	}
+	expenseRepo, err := repositories.NewExpenseRepository(ctx, db, logRepo)
+	if err != nil {
+		fatal("failed to initialize expense repository", "error", err)
+	}
 
 	// Initialize handler and API
-	h := handler.NewHandler(logRepo)
+	h := handler.NewHandler(expenseRepo)
 	server := api.NewServer(h, cfg.AppVersion)
 
 	// Start HTTP server

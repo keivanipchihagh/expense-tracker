@@ -7,16 +7,16 @@ import (
 )
 
 type Handler struct {
-	logRepo repositories.LogRepository
-	logger  *slog.Logger
+	expenseRepo repositories.ExpenseRepository
+	logger      *slog.Logger
 }
 
-func NewHandler(logRepo repositories.LogRepository) *Handler {
-	if logRepo == nil {
-		panic("handler: log repository must not be nil")
+func NewHandler(expenseRepo repositories.ExpenseRepository) *Handler {
+	if expenseRepo == nil {
+		panic("handler: expense repository must not be nil")
 	}
 	return &Handler{
-		logRepo: logRepo,
-		logger:  slog.Default().With("module", "handler"),
+		expenseRepo: expenseRepo,
+		logger:      slog.Default().With("module", "handler"),
 	}
 }

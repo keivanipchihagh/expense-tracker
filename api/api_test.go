@@ -10,17 +10,18 @@ import (
 	"go.uber.org/mock/gomock"
 )
 
-// newTestRoutes returns the API routes backed by a handler with mock repositories.
-func newTestRoutes(t *testing.T) http.Handler {
+// newTestRoutes returns the API routes backed by a handler with a mock
+// expense repository, which the test sets expectations on.
+func newTestRoutes(t *testing.T) (http.Handler, *repositories.MockExpenseRepository) {
 	t.Helper()
 	ctrl := gomock.NewController(t)
-	h := handler.NewHandler(repositories.NewMockLogRepository(ctrl))
-	return NewServer(h, "v1.2.3").Routes()
+	repo := repositories.NewMockExpenseRepository(ctrl)
+	return NewServer(handler.NewHandler(repo), "v1.2.3").Routes(), repo
 }
 
 func TestNewServer_Panics(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	h := handler.NewHandler(repositories.NewMockLogRepository(ctrl))
+	h := handler.NewHandler(repositories.NewMockExpenseRepository(ctrl))
 
 	assert.Panics(t, func() { NewServer(nil, "v1.2.3") }, "nil handler")
 	assert.Panics(t, func() { NewServer(h, "") }, "empty version")
