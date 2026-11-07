@@ -17,7 +17,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 FROM gcr.io/distroless/static-debian13:nonroot
 
 ARG APP_VERSION=dev
-ENV EXPENSE_TRACKER_APP_VERSION=${APP_VERSION}
+ENV APP_VERSION=${APP_VERSION}
 
 COPY --from=builder /out/expense-tracker /expense-tracker
 

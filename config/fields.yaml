@@ -1,0 +1,43 @@
+# Expense fields for this deployment.
+#
+# Columns are created from this file on first start. If the file and the
+# existing table disagree later, the service refuses to start.
+#
+# Field keys:
+#   name         required  ^[a-z][a-z0-9_]{0,62}$, not a core field name
+#   type         required  string | text | integer | number | boolean | date | datetime | enum | list
+#   description  required  shown to API clients and AI agents
+#   required     optional  default false
+#   default      optional  used on create when the field is omitted
+#   label        optional  display name, defaults to name
+#   values       enum only allowed values
+#   min / max    integer, number
+#   min_length / max_length  string, text
+
+currencies: [USD, EUR]
+
+fields:
+  - name: category
+    type: enum
+    description: "Spending category. Pick the closest match."
+    values: [food, groceries, transport, housing, utilities, health, entertainment, shopping, travel, other]
+    required: true
+
+  - name: merchant
+    type: string
+    description: "Store or vendor, e.g. 'Rewe', 'Amazon'."
+    max_length: 200
+
+  - name: payment_method
+    type: enum
+    description: "How the expense was paid."
+    values: [card, cash, bank_transfer, paypal]
+
+  - name: note
+    type: text
+    description: "Free-form note."
+    max_length: 2000
+
+  - name: tags
+    type: list
+    description: "Free-form tags, e.g. ['work', 'trip-berlin']."

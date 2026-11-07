@@ -2,46 +2,67 @@ package config
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestNewConfig(t *testing.T) {
+	defaults := Config{
+		AppVersion:         "dev",
+		LogLevel:           "info",
+		HttpPort:           8000,
+		HttpRequestTimeout: 30 * time.Second,
+		HttpMaxBodyBytes:   1 << 20,
+	}
+
 	tests := []struct {
-		name        string
-		env         map[string]string
-		wantLevel   string
-		wantFormat  string
-		wantVersion string
+		name    string
+		env     map[string]string
+		want    Config
+		wantErr bool
 	}{
 		{
-			name:        "defaults",
-			env:         map[string]string{},
-			wantLevel:   "info",
-			wantFormat:  "json",
-			wantVersion: "dev",
+			name: "defaults",
+			env:  map[string]string{},
+			want: defaults,
 		},
 		{
-			name: "values from prefixed environment variables",
+			name: "values from environment variables",
 			env: map[string]string{
-				"EXPENSE_TRACKER_LOGGER_LEVEL":  "debug",
-				"EXPENSE_TRACKER_LOGGER_FORMAT": "text",
-				"EXPENSE_TRACKER_APP_VERSION":   "v1.2.3",
+				"APP_VERSION":          "v1.2.3",
+				"LOG_LEVEL":            "debug",
+				"HTTP_PORT":            "9000",
+				"HTTP_REQUEST_TIMEOUT": "5s",
+				"HTTP_MAX_BODY_BYTES":  "2048",
 			},
-			wantLevel:   "debug",
-			wantFormat:  "text",
-			wantVersion: "v1.2.3",
+			want: Config{
+				AppVersion:         "v1.2.3",
+				LogLevel:           "debug",
+				HttpPort:           9000,
+				HttpRequestTimeout: 5 * time.Second,
+				HttpMaxBodyBytes:   2048,
+			},
 		},
 		{
-			name: "unprefixed variables are ignored",
+			name: "similarly named variables are ignored",
 			env: map[string]string{
-				"LOGGER_LEVEL": "debug",
-				"APP_VERSION":  "v9.9.9",
+				"PORT":    "9000",
+				"VERSION": "v9.9.9",
+				"LEVEL":   "debug",
 			},
-			wantLevel:   "info",
-			wantFormat:  "json",
-			wantVersion: "dev",
+			want: defaults,
+		},
+		{
+			name:    "invalid port",
+			env:     map[string]string{"HTTP_PORT": "abc"},
+			wantErr: true,
+		},
+		{
+			name:    "invalid duration",
+			env:     map[string]string{"HTTP_REQUEST_TIMEOUT": "soon"},
+			wantErr: true,
 		},
 	}
 
@@ -52,11 +73,12 @@ func TestNewConfig(t *testing.T) {
 			}
 
 			cfg, err := NewConfig()
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
 			require.NoError(t, err)
-
-			assert.Equal(t, tt.wantLevel, cfg.Logger.Level)
-			assert.Equal(t, tt.wantFormat, cfg.Logger.Format)
-			assert.Equal(t, tt.wantVersion, cfg.App.Version)
+			assert.Equal(t, tt.want, cfg)
 		})
 	}
 }

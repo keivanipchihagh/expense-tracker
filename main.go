@@ -1,10 +1,7 @@
 package main
 
-import (
-	"github.com/keivanipchihagh/expense-tracker/internal"
-	"github.com/keivanipchihagh/expense-tracker/pkg/service"
-)
+import "github.com/keivanipchihagh/expense-tracker/internal"
 
 func main() {
-	service.Run("expense-tracker", &internal.Service{})
+	internal.Run()
 }
