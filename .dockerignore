@@ -5,8 +5,7 @@
 data/
 *.md
 LICENSE
-Dockerfile
-docker-compose.yaml
+deploy/
 .dockerignore
 .gitignore
 .coverage/

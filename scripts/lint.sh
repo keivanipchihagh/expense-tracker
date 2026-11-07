@@ -10,4 +10,11 @@ fi
 
 go fix ./...
 go vet ./...
+
+unformatted="$(gofmt -l .)"
+if [ -n "$unformatted" ]; then
+	echo "Files need gofmt:"
+	echo "$unformatted"
+	exit 1
+fi
 echo "Lint/vet completed."
