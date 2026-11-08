@@ -1,4 +1,5 @@
-// Small behaviours the server can't do: the browser knows its own time zone.
+// Small behaviours the server can't do: the browser knows its own time zone,
+// and the editor dialog closes without a round trip.
 (function () {
   "use strict";
 
@@ -24,15 +25,23 @@
     });
   }
 
+  function closeEditor() {
+    var editor = document.getElementById("editor");
+    if (editor) editor.innerHTML = "";
+  }
+
   document.addEventListener("htmx:load", function (event) {
     fillTimeFields(event.detail.elt);
   });
 
-  // "Cancel" closes the editor without a round trip.
   document.addEventListener("click", function (event) {
-    if (event.target.closest("[data-close-editor]")) {
-      var editor = document.getElementById("editor");
-      if (editor) editor.innerHTML = "";
+    // The close buttons, or a click on the dimmed backdrop around the dialog.
+    if (event.target.closest("[data-close-editor]") || event.target.id === "editor") {
+      closeEditor();
     }
+  });
+
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape") closeEditor();
   });
 })();

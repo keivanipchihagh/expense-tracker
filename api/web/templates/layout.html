@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
   <meta name="htmx-config" content='{"includeIndicatorStyles":false,"allowEval":false,"allowScriptTags":false}'>
   <title>{{.Title}} · expense-tracker</title>
   <link rel="stylesheet" href="/static/style.css">
@@ -10,14 +11,16 @@
   <script src="/static/app.js" defer></script>
 </head>
 <body>
+  {{if .SignedIn}}
   <header class="topbar">
-    <a class="brand" href="/">expense-tracker</a>
-    {{if .SignedIn}}
+    <a class="brand" href="/">
+      <span class="brand-mark" aria-hidden="true"></span>expense-tracker
+    </a>
     <form method="post" action="/logout">
-      <button type="submit" class="link">Sign out</button>
+      <button type="submit" class="ghost small">Sign out</button>
     </form>
-    {{end}}
   </header>
+  {{end}}
   <main>
     {{template "content" .}}
   </main>

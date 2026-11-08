@@ -4,17 +4,32 @@
   <input type="hidden" name="to" value="{{.Range.To}}">
 </div>
 
-<p class="range-label">{{.Range.Label}}</p>
+<div class="filters">
+  <nav class="segmented" aria-label="Date range">
+    {{range .Presets}}
+    <a href="/?from={{.From}}&amp;to={{.To}}" class="{{if .Active}}active{{end}}" {{if .Active}}aria-current="true"{{end}}
+       hx-get="/ui/expenses?from={{.From}}&amp;to={{.To}}" hx-target="#results" hx-push-url="/?from={{.From}}&amp;to={{.To}}">{{.Label}}</a>
+    {{end}}
+  </nav>
+  <details class="custom-range">
+    <summary>{{.Range.Label}}</summary>
+    <form hx-get="/ui/expenses" hx-target="#results">
+      <input type="date" name="from" value="{{.Range.From}}" aria-label="From">
+      <span class="muted">to</span>
+      <input type="date" name="to" value="{{.Range.To}}" aria-label="To">
+      <button type="submit" class="small">Apply</button>
+    </form>
+  </details>
+</div>
 
 {{if .Totals}}
-<section class="totals">
+<section class="summary">
   {{range .Totals}}
   {{$symbol := .Symbol}}
-  <article class="card total" aria-label="{{.Currency}} total">
-    <header>
-      <span class="total-amount">{{.Symbol}}{{.Total}}</span>
-      <span class="muted">{{.Count}} expense{{if ne .Count 1}}s{{end}}</span>
-    </header>
+  <article class="summary-item" aria-label="{{.Currency}} total">
+    <p class="summary-label">Spent in {{.Currency}}</p>
+    <p class="summary-amount">{{.Symbol}}{{.Total}}</p>
+    <p class="muted small-text">{{.Count}} expense{{if ne .Count 1}}s{{end}}</p>
     <ul class="breakdown">
       {{range .Categories}}
       <li>
@@ -29,38 +44,40 @@
 </section>
 {{end}}
 
-{{if .Rows}}
-<div class="table-wrap">
-  <table>
-    <thead>
-      <tr>
-        <th>Date</th>
-        <th>Category</th>
-        <th>Merchant</th>
-        <th>Note</th>
-        <th class="num">Amount</th>
-        <th><span class="sr-only">Actions</span></th>
-      </tr>
-    </thead>
-    <tbody>
-      {{range .Rows}}
-      <tr>
-        <td><span class="date">{{.Date}}</span> <span class="muted">{{.Time}} {{.Offset}}</span></td>
-        <td><span class="tag">{{.Category}}</span></td>
-        <td>{{.Merchant}}</td>
-        <td class="note">{{.Note}}</td>
-        <td class="num" title="{{.Currency}}">{{.Symbol}}{{.Amount}}</td>
-        <td class="actions">
-          <button class="link" hx-get="/ui/expenses/{{.Id}}/edit" hx-include="#range" hx-target="#editor">Edit</button>
-          <button class="link danger" hx-post="/ui/expenses/{{.Id}}/delete" hx-include="#range" hx-target="#editor"
-                  hx-confirm="Delete this expense? This can't be undone.">Delete</button>
-        </td>
-      </tr>
-      {{end}}
-    </tbody>
-  </table>
-</div>
+{{if .Days}}
+<section class="days">
+  {{range .Days}}
+  <h2 class="day">{{.Label}}</h2>
+  <ul class="rows">
+    {{range .Rows}}
+    <li class="row">
+      <span class="avatar" aria-hidden="true">{{slice .Category 0 1}}</span>
+      <div class="row-main">
+        <span class="row-title">{{if .Merchant}}{{.Merchant}}{{else}}<span class="cat">{{.Category}}</span>{{end}}</span>
+        <span class="row-meta"><span class="cat">{{.Category}}</span> · {{.Time}} <span class="offset">{{.Offset}}</span></span>
+        {{if .Note}}<span class="row-note">{{.Note}}</span>{{end}}
+      </div>
+      <span class="row-amount" title="{{.Currency}}">{{.Symbol}}{{.Amount}}</span>
+      <div class="row-actions">
+        <button class="icon" aria-label="Edit" title="Edit"
+                hx-get="/ui/expenses/{{.Id}}/edit" hx-include="#range" hx-target="#editor">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z"/></svg>
+        </button>
+        <button class="icon danger" aria-label="Delete" title="Delete"
+                hx-post="/ui/expenses/{{.Id}}/delete" hx-include="#range" hx-target="#editor"
+                hx-confirm="Delete this expense? This can't be undone.">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/></svg>
+        </button>
+      </div>
+    </li>
+    {{end}}
+  </ul>
+  {{end}}
+</section>
 {{else}}
-<p class="empty">No expenses in this range.</p>
+<div class="empty">
+  <p class="empty-title">No expenses in this range.</p>
+  <p class="muted">Add one, or pick another range.</p>
+</div>
 {{end}}
 {{end}}

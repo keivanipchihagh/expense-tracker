@@ -35,6 +35,10 @@ func TestBuildResults(t *testing.T) {
 		ids = append(ids, r.Id)
 	}
 	assert.Equal(t, []string{"e4", "e3", "e2", "e1"}, ids, "newest first")
+
+	require.Len(t, got.Days, 4, "one group per local date")
+	assert.Equal(t, "Wednesday, 4 November 2026", got.Days[0].Label)
+	assert.Equal(t, "Sunday, 1 November 2026", got.Days[3].Label)
 	assert.Equal(t, expenseRow{Id: "e2", Date: "2026-11-02", Time: "09:30", Offset: "+01:00", Amount: "30.00", Currency: "EUR", Symbol: "€", Category: "groceries", Merchant: "Rewe"}, got.Rows[2])
 
 	require.Len(t, got.Totals, 2, "one total per currency; currencies are never added together")
@@ -116,12 +120,16 @@ func TestRangeFromQuery(t *testing.T) {
 
 func TestPresets(t *testing.T) {
 	now := time.Date(2026, 3, 31, 10, 0, 0, 0, time.UTC)
-	got := presets(now)
+	got := presets(now, dateRange{"2026-02-01", "2026-02-28"})
 
-	assert.Equal(t, preset{"This month", dateRange{"2026-03-01", "2026-03-31"}}, got[0])
-	assert.Equal(t, preset{"Last month", dateRange{"2026-02-01", "2026-02-28"}}, got[1])
-	assert.Equal(t, preset{"This year", dateRange{"2026-01-01", "2026-12-31"}}, got[2])
-	assert.Equal(t, preset{"All time", dateRange{}}, got[3])
+	assert.Equal(t, preset{Label: "This month", dateRange: dateRange{"2026-03-01", "2026-03-31"}}, got[0])
+	assert.Equal(t, preset{Label: "Last month", dateRange: dateRange{"2026-02-01", "2026-02-28"}, Active: true}, got[1])
+	assert.Equal(t, preset{Label: "This year", dateRange: dateRange{"2026-01-01", "2026-12-31"}}, got[2])
+	assert.Equal(t, preset{Label: "All time", dateRange: dateRange{}}, got[3])
+
+	for _, p := range presets(now, dateRange{"2026-03-05", "2026-03-06"}) {
+		assert.False(t, p.Active, "a custom range matches no preset")
+	}
 }
 
 func TestDateRange_Label(t *testing.T) {

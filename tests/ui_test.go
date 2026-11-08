@@ -135,7 +135,8 @@ func TestUI_ExpenseLifecycle(t *testing.T) {
 	assert.Contains(t, saved, `<div id="editor" hx-swap-oob="true"></div>`)
 	assert.Contains(t, saved, "Rewe")
 	assert.Contains(t, saved, "€12.50")
-	assert.Contains(t, saved, "13:20 &#43;01:00", "+ is HTML-escaped; browsers show +01:00")
+	assert.Contains(t, saved, `13:20 <span class="offset">&#43;01:00</span>`, "+ is HTML-escaped; browsers show +01:00")
+	assert.Contains(t, saved, "Saturday, 7 November 2026", "expenses are grouped by local date")
 
 	// The created expense, via the API
 	s.login(t)

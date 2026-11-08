@@ -1,20 +1,13 @@
 {{define "index.html"}}{{template "layout" .}}{{end}}
 
 {{define "content"}}
-<section class="toolbar">
-  <form class="filters" hx-get="/ui/expenses" hx-target="#results" hx-push-url="true">
-    <label>From <input type="date" name="from" value="{{.Results.Range.From}}"></label>
-    <label>To <input type="date" name="to" value="{{.Results.Range.To}}"></label>
-    <button type="submit">Apply</button>
-  </form>
-  <nav class="presets" aria-label="Date presets">
-    {{range .Presets}}
-    <a href="/?from={{.From}}&amp;to={{.To}}"
-       hx-get="/ui/expenses?from={{.From}}&amp;to={{.To}}" hx-target="#results" hx-push-url="/?from={{.From}}&amp;to={{.To}}">{{.Label}}</a>
-    {{end}}
-  </nav>
-  <button class="primary" hx-get="/ui/expenses/new" hx-include="#range" hx-target="#editor">Add expense</button>
-</section>
+<div class="page-head">
+  <h1>Expenses</h1>
+  <button class="primary" hx-get="/ui/expenses/new" hx-include="#range" hx-target="#editor">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+    Add expense
+  </button>
+</div>
 
 <div id="editor"></div>
 

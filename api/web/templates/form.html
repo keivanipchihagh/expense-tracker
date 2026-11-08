@@ -1,51 +1,57 @@
 {{define "form"}}
-<section class="card editor">
-  <h2>{{if .Id}}Edit expense{{else}}Add expense{{end}}</h2>
-  {{if .Errors}}<p class="error" role="alert">Please fix the highlighted fields.</p>{{end}}
+<section class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+  <header class="sheet-head">
+    <h2 id="sheet-title">{{if .Id}}Edit expense{{else}}New expense{{end}}</h2>
+    <button type="button" class="icon" aria-label="Close" data-close-editor>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+  </header>
+  {{if .Errors}}<p class="alert" role="alert">Please fix the highlighted fields.</p>{{end}}
   <form {{if .Id}}hx-post="/ui/expenses/{{.Id}}"{{else}}hx-post="/ui/expenses"{{end}} hx-target="#editor">
     <input type="hidden" name="from" value="{{.Range.From}}">
     <input type="hidden" name="to" value="{{.Range.To}}">
     <input type="hidden" name="tz_offset" value="{{.Values.TzOffset}}">
 
-    <div class="grid">
-      <label class="{{if index .Errors "amount"}}invalid{{end}}">Amount
-        <input name="amount" inputmode="decimal" value="{{.Values.Amount}}" placeholder="12.50" required>
-        {{with index .Errors "amount"}}<small class="error">{{.}}</small>{{end}}
-      </label>
+    <div class="amount-field {{if or (index .Errors "amount") (index .Errors "currency")}}invalid{{end}}">
+      <select name="currency" aria-label="Currency">
+        {{range .Currencies}}<option value="{{.Code}}" {{if eq .Code $.Values.Currency}}selected{{end}}>{{.Code}} ({{.Symbol}})</option>{{end}}
+      </select>
+      <input name="amount" inputmode="decimal" value="{{.Values.Amount}}" placeholder="0.00" aria-label="Amount" required autofocus>
+    </div>
+    {{with index .Errors "amount"}}<small class="field-error">{{.}}</small>{{end}}
+    {{with index .Errors "currency"}}<small class="field-error">{{.}}</small>{{end}}
 
-      <label class="{{if index .Errors "currency"}}invalid{{end}}">Currency
-        <select name="currency">
-          {{range .Currencies}}<option value="{{.Code}}" {{if eq .Code $.Values.Currency}}selected{{end}}>{{.Code}} ({{.Symbol}})</option>{{end}}
-        </select>
-        {{with index .Errors "currency"}}<small class="error">{{.}}</small>{{end}}
-      </label>
-
-      <label class="{{if index .Errors "occurred_at"}}invalid{{end}}">When
-        <input type="datetime-local" name="occurred_local" step="1" value="{{.Values.OccurredLocal}}" required>
-        {{with index .Errors "occurred_at"}}<small class="error">{{.}}</small>{{end}}
-      </label>
-
-      <label class="{{if index .Errors "category"}}invalid{{end}}">Category
+    <div class="fields">
+      <label class="{{if index .Errors "category"}}invalid{{end}}">
+        <span>Category</span>
         <select name="category">
           {{range .Categories}}<option value="{{.}}" {{if eq . $.Values.Category}}selected{{end}}>{{.}}</option>{{end}}
         </select>
-        {{with index .Errors "category"}}<small class="error">{{.}}</small>{{end}}
+        {{with index .Errors "category"}}<small class="field-error">{{.}}</small>{{end}}
       </label>
 
-      <label class="wide {{if index .Errors "merchant"}}invalid{{end}}">Merchant
+      <label class="{{if index .Errors "occurred_at"}}invalid{{end}}">
+        <span>When</span>
+        <input type="datetime-local" name="occurred_local" step="1" value="{{.Values.OccurredLocal}}" required>
+        {{with index .Errors "occurred_at"}}<small class="field-error">{{.}}</small>{{end}}
+      </label>
+
+      <label class="wide {{if index .Errors "merchant"}}invalid{{end}}">
+        <span>Merchant</span>
         <input name="merchant" value="{{.Values.Merchant}}" maxlength="200" placeholder="Optional">
-        {{with index .Errors "merchant"}}<small class="error">{{.}}</small>{{end}}
+        {{with index .Errors "merchant"}}<small class="field-error">{{.}}</small>{{end}}
       </label>
 
-      <label class="wide {{if index .Errors "note"}}invalid{{end}}">Note
+      <label class="wide {{if index .Errors "note"}}invalid{{end}}">
+        <span>Note</span>
         <textarea name="note" rows="2" maxlength="2000" placeholder="Optional">{{.Values.Note}}</textarea>
-        {{with index .Errors "note"}}<small class="error">{{.}}</small>{{end}}
+        {{with index .Errors "note"}}<small class="field-error">{{.}}</small>{{end}}
       </label>
     </div>
 
-    <div class="buttons">
+    <div class="sheet-actions">
+      <button type="button" class="ghost" data-close-editor>Cancel</button>
       <button type="submit" class="primary">{{if .Id}}Save changes{{else}}Add expense{{end}}</button>
-      <button type="button" data-close-editor>Cancel</button>
     </div>
   </form>
 </section>

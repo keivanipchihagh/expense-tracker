@@ -115,7 +115,6 @@ func (s *Server) IndexPage(w http.ResponseWriter, r *http.Request) {
 		Title:    "Expenses",
 		SignedIn: true,
 		Results:  results,
-		Presets:  presets(time.Now()),
 	})
 }
 
@@ -293,7 +292,9 @@ func (s *Server) results(r *http.Request, rng dateRange) (resultsData, error) {
 	if err != nil {
 		return resultsData{}, err
 	}
-	return buildResults(rng, expenses), nil
+	results := buildResults(rng, expenses)
+	results.Presets = presets(time.Now(), rng)
+	return results, nil
 }
 
 func (s *Server) renderPage(w http.ResponseWriter, status int, page string, data pageData) {
@@ -329,7 +330,6 @@ type pageData struct {
 	SignedIn bool
 	Error    string
 	Results  resultsData
-	Presets  []preset
 }
 
 // dateRange holds YYYY-MM-DD bounds; an empty bound is open.
@@ -376,24 +376,39 @@ func currentMonth(now time.Time) dateRange {
 type preset struct {
 	Label string
 	dateRange
+	// Active is true when the preset is the range being shown.
+	Active bool
 }
 
-func presets(now time.Time) []preset {
+// presets returns the quick ranges, marking the one equal to current.
+func presets(now time.Time, current dateRange) []preset {
 	thisMonth := currentMonth(now)
 	firstOfMonth, _ := time.Parse(time.DateOnly, thisMonth.From)
 	lastMonthStart := firstOfMonth.AddDate(0, -1, 0)
-	return []preset{
-		{"This month", thisMonth},
-		{"Last month", dateRange{lastMonthStart.Format(time.DateOnly), firstOfMonth.AddDate(0, 0, -1).Format(time.DateOnly)}},
-		{"This year", dateRange{fmt.Sprintf("%d-01-01", now.Year()), fmt.Sprintf("%d-12-31", now.Year())}},
-		{"All time", dateRange{}},
+	out := []preset{
+		{Label: "This month", dateRange: thisMonth},
+		{Label: "Last month", dateRange: dateRange{lastMonthStart.Format(time.DateOnly), firstOfMonth.AddDate(0, 0, -1).Format(time.DateOnly)}},
+		{Label: "This year", dateRange: dateRange{fmt.Sprintf("%d-01-01", now.Year()), fmt.Sprintf("%d-12-31", now.Year())}},
+		{Label: "All time", dateRange: dateRange{}},
 	}
+	for i := range out {
+		out[i].Active = out[i].dateRange == current
+	}
+	return out
 }
 
 type resultsData struct {
-	Range  dateRange
-	Rows   []expenseRow
-	Totals []currencyTotal
+	Range   dateRange
+	Presets []preset
+	Rows    []expenseRow
+	Days    []dayGroup
+	Totals  []currencyTotal
+}
+
+// dayGroup is the expenses of one local date, newest first.
+type dayGroup struct {
+	Label string
+	Rows  []expenseRow
 }
 
 type expenseRow struct {
@@ -428,8 +443,7 @@ func buildResults(rng dateRange, expenses []models.Expense) resultsData {
 	byCurrency := map[string]*sums{}
 
 	for _, e := range slices.Backward(expenses) {
-
-		out.Rows = append(out.Rows, expenseRow{
+		row := expenseRow{
 			Id:       e.Id,
 			Date:     e.OccurredAt.Format(time.DateOnly),
 			Time:     e.OccurredAt.Format("15:04"),
@@ -440,7 +454,14 @@ func buildResults(rng dateRange, expenses []models.Expense) resultsData {
 			Category: string(e.Category),
 			Merchant: deref(e.Merchant),
 			Note:     deref(e.Note),
-		})
+		}
+		out.Rows = append(out.Rows, row)
+
+		label := e.OccurredAt.Format("Monday, 2 January 2006")
+		if n := len(out.Days); n == 0 || out.Days[n-1].Label != label {
+			out.Days = append(out.Days, dayGroup{Label: label})
+		}
+		out.Days[len(out.Days)-1].Rows = append(out.Days[len(out.Days)-1].Rows, row)
 
 		amount, err := decimal.NewFromString(e.Amount)
 		if err != nil {
