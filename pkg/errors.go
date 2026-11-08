@@ -23,6 +23,7 @@ func (e *Error) Error() string {
 var (
 	InternalError      = &Error{Status: http.StatusInternalServerError, Code: "internal", Message: "internal server error"}
 	ErrExpenseNotFound = &Error{Status: http.StatusNotFound, Code: "not_found", Message: "expense not found"}
+	ErrAppNotFound     = &Error{Status: http.StatusNotFound, Code: "not_found", Message: "app not found"}
 )
 
 // OAuthError is an OAuth 2.0 protocol error. The API sends it as

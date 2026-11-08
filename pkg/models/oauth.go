@@ -21,6 +21,13 @@ type OAuthClient struct {
 	CreatedAt    time.Time
 }
 
+// ConnectedApp is a registered client that currently holds a valid token.
+type ConnectedApp struct {
+	Client OAuthClient
+	// LastActiveAt is when it last received a token (sign-in or refresh).
+	LastActiveAt time.Time
+}
+
 // OAuthCode is a one-time authorization code waiting to be exchanged for
 // tokens. Only its hash is stored.
 type OAuthCode struct {

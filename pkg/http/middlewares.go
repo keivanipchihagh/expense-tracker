@@ -20,17 +20,16 @@ type TokenValidator func(ctx context.Context, token string) (bool, error)
 
 // BearerAuthMiddleware requires "Authorization: Bearer <token>" with a valid
 // token on every request whose path isPublic doesn't exempt. A rejection is a
-// 401 whose WWW-Authenticate header points at resourceMetadataUrl (RFC 9728);
-// that is how MCP clients find out where to log in.
-func BearerAuthMiddleware(validate TokenValidator, isPublic func(path string) bool, resourceMetadataUrl string) Middleware {
-	challenge := `Bearer resource_metadata="` + resourceMetadataUrl + `"`
-
+// 401 whose WWW-Authenticate header points at the resource metadata URL for
+// the request (RFC 9728); that is how MCP clients find out where to log in.
+func BearerAuthMiddleware(validate TokenValidator, isPublic func(path string) bool, resourceMetadataUrl func(r *http.Request) string) Middleware {
 	return func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if isPublic(r.URL.Path) {
 				h.ServeHTTP(w, r)
 				return
 			}
+			challenge := `Bearer resource_metadata="` + resourceMetadataUrl(r) + `"`
 
 			token, ok := bearerToken(r)
 			if !ok {

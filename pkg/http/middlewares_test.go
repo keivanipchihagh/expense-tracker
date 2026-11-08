@@ -132,7 +132,7 @@ func TestBearerAuthMiddleware(t *testing.T) {
 		return false, nil
 	}
 	isPublic := func(path string) bool { return path == "/health" }
-	mw := BearerAuthMiddleware(validate, isPublic, metadata)
+	mw := BearerAuthMiddleware(validate, isPublic, func(*http.Request) string { return metadata })
 
 	tests := []struct {
 		name          string

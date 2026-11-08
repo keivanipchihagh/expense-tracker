@@ -23,25 +23,39 @@ import (
 //go:embed web
 var webFS embed.FS
 
-// sessionCookie is the name of the UI session cookie.
-const sessionCookie = "et_session"
+// sessionCookieName is the UI session cookie's name over plain HTTP. Over
+// HTTPS the __Host- prefix is added: browsers then accept the cookie only
+// with Secure, Path=/ and no Domain, so subdomains can't set or replace it.
+const sessionCookieName = "et_session"
 
 // uiCsp allows only same-origin scripts and styles; nothing inline.
 const uiCsp = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
 	"frame-ancestors 'none'; form-action 'self'; base-uri 'none'"
 
+// templateFuncs are available in every template.
+var templateFuncs = template.FuncMap{
+	// title upper-cases the first letter: "groceries" → "Groceries".
+	"title": func(s string) string {
+		if s == "" {
+			return s
+		}
+		r := []rune(s)
+		return strings.ToUpper(string(r[0])) + string(r[1:])
+	},
+}
+
 // pages are parsed once: each page gets the layout and the shared partials.
 var pages = func() map[string]*template.Template {
 	out := map[string]*template.Template{}
-	for _, page := range []string{"index.html", "login.html"} {
-		out[page] = template.Must(template.ParseFS(webFS,
+	for _, page := range []string{"index.html", "login.html", "apps.html", "error.html"} {
+		out[page] = template.Must(template.New(page).Funcs(templateFuncs).ParseFS(webFS,
 			"web/templates/layout.html", "web/templates/results.html", "web/templates/form.html", "web/templates/"+page))
 	}
 	return out
 }()
 
 // partials renders the HTMX fragments: "results", "form" and "saved".
-var partials = template.Must(template.ParseFS(webFS, "web/templates/results.html", "web/templates/form.html"))
+var partials = template.Must(template.New("partials").Funcs(templateFuncs).ParseFS(webFS, "web/templates/results.html", "web/templates/form.html"))
 
 func staticFiles() http.Handler {
 	sub, err := fs.Sub(webFS, "web/static")
@@ -94,7 +108,7 @@ func (s *Server) Logout(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "cross-origin request rejected", http.StatusForbidden)
 		return
 	}
-	if c, err := r.Cookie(sessionCookie); err == nil {
+	if c, err := r.Cookie(s.cookieName()); err == nil {
 		_ = s.handler.Logout(r.Context(), c.Value)
 	}
 	expired := s.sessionCookie("", time.Unix(0, 0))
@@ -114,6 +128,7 @@ func (s *Server) IndexPage(w http.ResponseWriter, r *http.Request) {
 	s.renderPage(w, http.StatusOK, "index.html", pageData{
 		Title:    "Expenses",
 		SignedIn: true,
+		Nav:      "expenses",
 		Results:  results,
 	})
 }
@@ -245,8 +260,15 @@ func (s *Server) requireSession(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+func (s *Server) cookieName() string {
+	if s.secureCookies {
+		return "__Host-" + sessionCookieName
+	}
+	return sessionCookieName
+}
+
 func (s *Server) signedIn(r *http.Request) bool {
-	c, err := r.Cookie(sessionCookie)
+	c, err := r.Cookie(s.cookieName())
 	if err != nil {
 		return false
 	}
@@ -262,7 +284,7 @@ func (s *Server) signedIn(r *http.Request) bool {
 // browsers never send it with requests started by other sites.
 func (s *Server) sessionCookie(value string, expires time.Time) *http.Cookie {
 	return &http.Cookie{
-		Name:     sessionCookie,
+		Name:     s.cookieName(),
 		Value:    value,
 		Path:     "/",
 		Expires:  expires,
@@ -328,8 +350,65 @@ func (s *Server) renderUiError(w http.ResponseWriter, r *http.Request, err error
 type pageData struct {
 	Title    string
 	SignedIn bool
-	Error    string
-	Results  resultsData
+	// Status is the HTTP status shown on the error page.
+	Status int
+	// Nav marks the active top-bar link: "expenses" or "apps".
+	Nav     string
+	Error   string
+	Results resultsData
+	Apps    []appRow
+}
+
+// appRow is a connected app as shown on the apps page.
+type appRow struct {
+	Id, Name, Initial, RedirectHost, ConnectedAt, LastActiveAt string
+}
+
+func appRows(apps []models.ConnectedApp) []appRow {
+	out := make([]appRow, 0, len(apps))
+	for _, a := range apps {
+		host := ""
+		if len(a.Client.RedirectUris) > 0 {
+			if u, err := url.Parse(a.Client.RedirectUris[0]); err == nil && u.Host != "" {
+				host = u.Host
+			} else {
+				host = a.Client.RedirectUris[0]
+			}
+		}
+		name := a.Client.Name
+		if name == "" {
+			name = "Unnamed client"
+		}
+		out = append(out, appRow{
+			Id:           a.Client.Id,
+			Name:         name,
+			Initial:      string([]rune(name)[:1]),
+			RedirectHost: host,
+			ConnectedAt:  a.Client.CreatedAt.Format("2 Jan 2006"),
+			LastActiveAt: a.LastActiveAt.Format("2 Jan 2006 15:04 MST"),
+		})
+	}
+	return out
+}
+
+// AppsPage handles GET /apps: the apps signed in through OAuth.
+func (s *Server) AppsPage(w http.ResponseWriter, r *http.Request) {
+	apps, err := s.handler.ListConnectedApps(r.Context())
+	if err != nil {
+		s.renderUiError(w, r, err)
+		return
+	}
+	s.renderPage(w, http.StatusOK, "apps.html", pageData{Title: "Connected apps", SignedIn: true, Nav: "apps", Apps: appRows(apps)})
+}
+
+// RevokeAppSubmit handles POST /ui/apps/{id}/revoke. The empty response
+// removes the app's row.
+func (s *Server) RevokeAppSubmit(w http.ResponseWriter, r *http.Request) {
+	if err := s.handler.RevokeApp(r.Context(), r.PathValue("id")); err != nil && !errors.Is(err, pkg.ErrAppNotFound) {
+		s.renderUiError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
 }
 
 // dateRange holds YYYY-MM-DD bounds; an empty bound is open.

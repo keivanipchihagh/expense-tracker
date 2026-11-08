@@ -25,7 +25,7 @@
       <label class="{{if index .Errors "category"}}invalid{{end}}">
         <span>Category</span>
         <select name="category">
-          {{range .Categories}}<option value="{{.}}" {{if eq . $.Values.Category}}selected{{end}}>{{.}}</option>{{end}}
+          {{range .Categories}}<option value="{{.}}" {{if eq . $.Values.Category}}selected{{end}}>{{title .}}</option>{{end}}
         </select>
         {{with index .Errors "category"}}<small class="field-error">{{.}}</small>{{end}}
       </label>

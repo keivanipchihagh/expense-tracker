@@ -122,6 +122,65 @@ func TestRegisterClient_DefaultName(t *testing.T) {
 	assert.Equal(t, "Unnamed client", client.Name)
 }
 
+func TestRegisterClient_RateLimited(t *testing.T) {
+	ts := setupOAuthSuite(t)
+	ts.oauthRepo.EXPECT().CreateClient(gomock.Any(), gomock.Any()).Return(nil).Times(maxRegistrations)
+	req := RegisterClientRequest{RedirectUris: []string{"https://a.example/cb"}, TokenEndpointAuthMethod: "none"}
+
+	for range maxRegistrations {
+		_, _, err := ts.handler.RegisterClient(context.Background(), req)
+		require.NoError(t, err)
+	}
+	_, _, err := ts.handler.RegisterClient(context.Background(), req)
+	status, code := oauthErrCode(t, err)
+	assert.Equal(t, http.StatusTooManyRequests, status)
+	assert.Equal(t, "temporarily_unavailable", code)
+
+	ts.handler.now = func() time.Time { return testNow.Add(registrationWindow + time.Second) }
+	ts.oauthRepo.EXPECT().CreateClient(gomock.Any(), gomock.Any()).Return(nil)
+	_, _, err = ts.handler.RegisterClient(context.Background(), req)
+	assert.NoError(t, err, "the window slides")
+}
+
+func TestListConnectedApps(t *testing.T) {
+	ts := setupOAuthSuite(t)
+	want := []models.ConnectedApp{{Client: publicClient(), LastActiveAt: testNow}}
+	ts.oauthRepo.EXPECT().ListConnectedApps(gomock.Any(), testNow).Return(want, nil)
+
+	got, err := ts.handler.ListConnectedApps(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
+
+	ts.oauthRepo.EXPECT().ListConnectedApps(gomock.Any(), gomock.Any()).Return(nil, errors.New("db down"))
+	_, err = ts.handler.ListConnectedApps(context.Background())
+	assert.Same(t, pkg.InternalError, err)
+}
+
+func TestRevokeApp(t *testing.T) {
+	tests := []struct {
+		name    string
+		repoErr error
+		wantErr error
+	}{
+		{name: "revoked"},
+		{name: "unknown app", repoErr: repositories.ErrOAuthNotFound, wantErr: pkg.ErrAppNotFound},
+		{name: "database error", repoErr: errors.New("db down"), wantErr: pkg.InternalError},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := setupOAuthSuite(t)
+			ts.oauthRepo.EXPECT().DeleteClient(gomock.Any(), "client-1").Return(tt.repoErr)
+
+			err := ts.handler.RevokeApp(context.Background(), "client-1")
+			if tt.wantErr != nil {
+				assert.Same(t, tt.wantErr, err)
+				return
+			}
+			assert.NoError(t, err)
+		})
+	}
+}
+
 func TestCheckAuthorizeRequest(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -374,6 +433,7 @@ func TestToken_RefreshToken(t *testing.T) {
 	t.Run("rotates", func(t *testing.T) {
 		ts := setupOAuthSuite(t)
 		ts.oauthRepo.EXPECT().GetClient(gomock.Any(), "client-1").Return(publicClient(), nil)
+		ts.oauthRepo.EXPECT().GetToken(gomock.Any(), hashSecret("old-refresh"), models.OAuthTokenRefresh).Return(refresh, nil)
 		ts.oauthRepo.EXPECT().ConsumeToken(gomock.Any(), hashSecret("old-refresh"), models.OAuthTokenRefresh).Return(refresh, nil)
 		ts.oauthRepo.EXPECT().CreateTokens(gomock.Any(), gomock.Any()).Return(nil)
 		ts.oauthRepo.EXPECT().DeleteExpired(gomock.Any(), gomock.Any()).Return(nil)
@@ -383,6 +443,8 @@ func TestToken_RefreshToken(t *testing.T) {
 		assert.NotEqual(t, "old-refresh", resp.RefreshToken)
 	})
 
+	// None of these consume the token (no ConsumeToken expectation): a token
+	// sent with the wrong client id must survive for its real owner.
 	rejected := []struct {
 		name  string
 		token models.OAuthToken
@@ -396,13 +458,24 @@ func TestToken_RefreshToken(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ts := setupOAuthSuite(t)
 			ts.oauthRepo.EXPECT().GetClient(gomock.Any(), "client-1").Return(publicClient(), nil)
-			ts.oauthRepo.EXPECT().ConsumeToken(gomock.Any(), gomock.Any(), models.OAuthTokenRefresh).Return(tt.token, tt.err)
+			ts.oauthRepo.EXPECT().GetToken(gomock.Any(), gomock.Any(), models.OAuthTokenRefresh).Return(tt.token, tt.err)
 
 			_, err := ts.handler.Token(context.Background(), req)
 			_, code := oauthErrCode(t, err)
 			assert.Equal(t, "invalid_grant", code)
 		})
 	}
+
+	t.Run("lost race with a concurrent refresh", func(t *testing.T) {
+		ts := setupOAuthSuite(t)
+		ts.oauthRepo.EXPECT().GetClient(gomock.Any(), "client-1").Return(publicClient(), nil)
+		ts.oauthRepo.EXPECT().GetToken(gomock.Any(), gomock.Any(), models.OAuthTokenRefresh).Return(refresh, nil)
+		ts.oauthRepo.EXPECT().ConsumeToken(gomock.Any(), gomock.Any(), models.OAuthTokenRefresh).Return(models.OAuthToken{}, repositories.ErrOAuthNotFound)
+
+		_, err := ts.handler.Token(context.Background(), req)
+		_, code := oauthErrCode(t, err)
+		assert.Equal(t, "invalid_grant", code)
+	})
 }
 
 func TestToken_IssueFailure(t *testing.T) {

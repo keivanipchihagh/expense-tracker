@@ -6,6 +6,7 @@ Self-hosted expense log. Single user, SQLite, one Go binary, runs in Docker.
 
 - [Run](#run)
 - [UI](#ui)
+- [MCP](#mcp)
 - [Authentication](#authentication)
 - [Tables](#tables)
   - [Expense](#expense)
@@ -30,19 +31,40 @@ Open `PUBLIC_URL` (by default http://localhost:8000) and sign in with `AUTH_PASS
 - List expenses for a date range, with presets for this month, last month, this year and all time
 - Totals per currency, with a breakdown by category
 - Add, edit and delete expenses; time and time zone default to your browser's
+- **Apps** page: see which apps (Claude, ChatGPT, …) are signed in through OAuth and revoke their access
 
-The UI is server-rendered (Go templates and [HTMX](https://htmx.org), bundled in the binary). Signing in sets an `HttpOnly`, `SameSite=Strict` session cookie valid for 30 days. The cookie only opens the UI; the JSON API always needs a bearer token.
+The UI is server-rendered (Go templates and [HTMX](https://htmx.org), bundled in the binary). Signing in sets an `HttpOnly`, `SameSite=Strict` session cookie valid for 30 days (named with the `__Host-` prefix when `PUBLIC_URL` is HTTPS). The cookie only opens the UI; the JSON API always needs a bearer token.
+
+## MCP
+
+An MCP server runs at `/mcp` (Streamable HTTP), so AI agents can log, correct and look up expenses for you. It uses the same validation and change log as the API.
+
+| Tool | Does |
+|---|---|
+| `create_expense` | Record an expense |
+| `list_expenses` | List expenses for a date range (`date_from`, `date_to`, both optional) |
+| `get_expense` | Get one expense by id |
+| `update_expense` | Change the fields sent; `null` clears `merchant` or `note` |
+| `delete_expense` | Delete an expense permanently |
+
+Clients log in with OAuth (see [Authentication](#authentication)): add the server and sign in with `AUTH_PASSWORD` when the browser opens. For example, with Claude Code:
+
+```bash
+claude mcp add --transport http expense-tracker http://localhost:8000/mcp
+```
+
+ChatGPT, claude.ai and Gemini connect from the internet, so they need `PUBLIC_URL` set to a public HTTPS address that reaches the server.
 
 ## Authentication
 
-Every `/api/` endpoint requires `Authorization: Bearer <access token>`. Tokens come from a built-in OAuth 2.1 server, the flow MCP clients such as Claude, ChatGPT and Gemini use:
+Every `/api/` endpoint and `/mcp` requires `Authorization: Bearer <access token>`. Tokens come from a built-in OAuth 2.1 server, the flow MCP clients such as Claude, ChatGPT and Gemini use:
 
 1. The client calls the API, gets `401`, and finds the OAuth endpoints through `/.well-known/oauth-protected-resource`.
 2. It registers itself (`POST /oauth/register`) and opens `/oauth/authorize` in your browser.
 3. You sign in with `AUTH_PASSWORD`. The page shows which app is asking and where it will redirect.
 4. The client exchanges the one-time code for an access token (valid 1 hour) and a refresh token (30 days, single use).
 
-PKCE (S256) is required. Tokens and codes are stored only as hashes. After 10 wrong passwords in 15 minutes (on this page or the UI sign-in), both are locked for the rest of that window.
+PKCE (S256) is required. Tokens and codes are stored only as hashes. After 10 wrong passwords in 15 minutes (on this page or the UI sign-in), both are locked for the rest of that window; tokens and sessions already issued keep working. Registration is open, as MCP clients expect, but capped at 20 new clients per hour, and clients that never sign in are deleted after a day. Revoke an app on the **Apps** page.
 
 Clients connecting from the internet (ChatGPT, claude.ai, Gemini) need `PUBLIC_URL` set to an HTTPS address that reaches the server, e.g. a Cloudflare Tunnel.
 

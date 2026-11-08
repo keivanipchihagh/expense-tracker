@@ -16,9 +16,13 @@
     <a class="brand" href="/">
       <span class="brand-mark" aria-hidden="true"></span>expense-tracker
     </a>
-    <form method="post" action="/logout">
-      <button type="submit" class="ghost small">Sign out</button>
-    </form>
+    <nav class="nav">
+      <a href="/" class="{{if eq .Nav "expenses"}}active{{end}}">Expenses</a>
+      <a href="/apps" class="{{if eq .Nav "apps"}}active{{end}}">Apps</a>
+      <form method="post" action="/logout">
+        <button type="submit" class="ghost small">Sign out</button>
+      </form>
+    </nav>
   </header>
   {{end}}
   <main>

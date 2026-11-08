@@ -16,9 +16,11 @@ type Handler struct {
 	publicUrl string
 	// password unlocks the OAuth login page and the UI.
 	password string
-	logins   *loginLimiter
-	now      func() time.Time
-	logger   *slog.Logger
+	// logins limits wrong passwords; registrations limits new OAuth clients.
+	logins        *rateLimiter
+	registrations *rateLimiter
+	now           func() time.Time
+	logger        *slog.Logger
 }
 
 func NewHandler(
@@ -34,13 +36,14 @@ func NewHandler(
 		panic("handler: public url and password must not be empty")
 	}
 	return &Handler{
-		expenseRepo: expenseRepo,
-		oauthRepo:   oauthRepo,
-		sessionRepo: sessionRepo,
-		publicUrl:   strings.TrimSuffix(publicUrl, "/"),
-		password:    password,
-		logins:      newLoginLimiter(),
-		now:         time.Now,
-		logger:      slog.Default().With("module", "handler"),
+		expenseRepo:   expenseRepo,
+		oauthRepo:     oauthRepo,
+		sessionRepo:   sessionRepo,
+		publicUrl:     strings.TrimSuffix(publicUrl, "/"),
+		password:      password,
+		logins:        newRateLimiter(maxFailedLogins, failedLoginWindow),
+		registrations: newRateLimiter(maxRegistrations, registrationWindow),
+		now:           time.Now,
+		logger:        slog.Default().With("module", "handler"),
 	}
 }

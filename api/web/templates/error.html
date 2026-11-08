@@ -1,0 +1,18 @@
+{{define "error.html"}}{{template "layout" .}}{{end}}
+
+{{define "content"}}
+<section class="error-page">
+  <a class="brand" href="/">
+    <span class="brand-mark" aria-hidden="true"></span>expense-tracker
+  </a>
+  <div class="error-body">
+    <p class="error-code">{{.Status}}</p>
+    <h1>{{.Title}}</h1>
+    <p class="muted">{{.Error}}</p>
+    <div class="error-actions">
+      <a class="button primary" href="/">Go to expenses</a>
+    </div>
+  </div>
+  <p class="error-foot muted">Error {{.Status}}</p>
+</section>
+{{end}}

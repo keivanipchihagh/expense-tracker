@@ -34,6 +34,11 @@ const (
 	// login page refuses all attempts until the window has passed.
 	maxFailedLogins   = 10
 	failedLoginWindow = 15 * time.Minute
+
+	// Registration is open, so it is capped: at most maxRegistrations new
+	// clients per registrationWindow.
+	maxRegistrations   = 20
+	registrationWindow = time.Hour
 )
 
 // codeChallengePattern matches a PKCE S256 challenge: base64url, 43 chars.
@@ -102,6 +107,10 @@ type TokenResponse struct {
 // as MCP clients expect; access still requires logging in with the password.
 // The returned secret is empty for public clients.
 func (h *Handler) RegisterClient(ctx context.Context, req RegisterClientRequest) (models.OAuthClient, string, error) {
+	if h.registrations.full(h.now()) {
+		h.logger.WarnContext(ctx, "oauth registration refused: rate limit reached")
+		return models.OAuthClient{}, "", pkg.NewOAuthError(http.StatusTooManyRequests, "temporarily_unavailable", "too many registrations, try again later")
+	}
 	if len(req.RedirectUris) == 0 || len(req.RedirectUris) > maxRedirectUris {
 		return models.OAuthClient{}, "", pkg.NewOAuthError(http.StatusBadRequest, "invalid_redirect_uri", "between 1 and 10 redirect_uris are required")
 	}
@@ -145,6 +154,7 @@ func (h *Handler) RegisterClient(ctx context.Context, req RegisterClientRequest)
 		h.logger.ErrorContext(ctx, "register oauth client failed", "error", err)
 		return models.OAuthClient{}, "", pkg.NewOAuthError(http.StatusInternalServerError, "server_error", "internal server error")
 	}
+	h.registrations.record(h.now())
 
 	h.logger.InfoContext(ctx, "oauth client registered", "client_id", client.Id, "client_name", client.Name)
 	return client, secret, nil
@@ -188,11 +198,11 @@ func (h *Handler) Authorize(ctx context.Context, req AuthorizeRequest, password 
 	}
 
 	now := h.now()
-	if h.logins.locked(now) {
+	if h.logins.full(now) {
 		return "", ErrTooManyLogins
 	}
 	if !secretsEqual(password, h.password) {
-		h.logins.fail(now)
+		h.logins.record(now)
 		h.logger.WarnContext(ctx, "oauth login failed: wrong password", "client_id", client.Id)
 		return "", ErrWrongPassword
 	}
@@ -240,6 +250,31 @@ func (h *Handler) Token(ctx context.Context, req TokenRequest) (TokenResponse, e
 	default:
 		return TokenResponse{}, pkg.NewOAuthError(http.StatusBadRequest, "unsupported_grant_type", "grant_type must be authorization_code or refresh_token")
 	}
+}
+
+// ListConnectedApps returns the apps that currently hold a valid token.
+func (h *Handler) ListConnectedApps(ctx context.Context) ([]models.ConnectedApp, error) {
+	apps, err := h.oauthRepo.ListConnectedApps(ctx, h.now())
+	if err != nil {
+		h.logger.ErrorContext(ctx, "list connected apps failed", "error", err)
+		return nil, pkg.InternalError
+	}
+	return apps, nil
+}
+
+// RevokeApp removes an app with all its tokens. Its next request fails with
+// 401 and it has to sign in again.
+func (h *Handler) RevokeApp(ctx context.Context, clientId string) error {
+	err := h.oauthRepo.DeleteClient(ctx, clientId)
+	if errors.Is(err, repositories.ErrOAuthNotFound) {
+		return pkg.ErrAppNotFound
+	}
+	if err != nil {
+		h.logger.ErrorContext(ctx, "revoke app failed", "error", err)
+		return pkg.InternalError
+	}
+	h.logger.InfoContext(ctx, "app access revoked", "client_id", clientId)
+	return nil
 }
 
 // ValidateAccessToken reports whether token is a current access token. An
@@ -298,17 +333,29 @@ func (h *Handler) exchangeCode(ctx context.Context, client models.OAuthClient, r
 func (h *Handler) refresh(ctx context.Context, client models.OAuthClient, req TokenRequest) (TokenResponse, error) {
 	invalid := pkg.NewOAuthError(http.StatusBadRequest, "invalid_grant", "refresh token is invalid, expired or already used")
 
-	// Consuming the token rotates it: each refresh token works once.
-	t, err := h.oauthRepo.ConsumeToken(ctx, hashSecret(req.RefreshToken), models.OAuthTokenRefresh)
+	// Check ownership and expiry before consuming, so a refresh token sent
+	// with the wrong client id is rejected without being destroyed.
+	hash := hashSecret(req.RefreshToken)
+	t, err := h.oauthRepo.GetToken(ctx, hash, models.OAuthTokenRefresh)
 	if errors.Is(err, repositories.ErrOAuthNotFound) {
 		return TokenResponse{}, invalid
 	}
 	if err != nil {
-		h.logger.ErrorContext(ctx, "consume refresh token failed", "error", err)
+		h.logger.ErrorContext(ctx, "get refresh token failed", "error", err)
 		return TokenResponse{}, pkg.NewOAuthError(http.StatusInternalServerError, "server_error", "internal server error")
 	}
 	if t.ClientId != client.Id || !h.now().Before(t.ExpiresAt) {
 		return TokenResponse{}, invalid
+	}
+
+	// Consuming the token rotates it: each refresh token works once. If two
+	// requests race, only one consumes it.
+	if _, err := h.oauthRepo.ConsumeToken(ctx, hash, models.OAuthTokenRefresh); err != nil {
+		if errors.Is(err, repositories.ErrOAuthNotFound) {
+			return TokenResponse{}, invalid
+		}
+		h.logger.ErrorContext(ctx, "consume refresh token failed", "error", err)
+		return TokenResponse{}, pkg.NewOAuthError(http.StatusInternalServerError, "server_error", "internal server error")
 	}
 	return h.issueTokens(ctx, client)
 }
@@ -440,37 +487,40 @@ func secretsEqual(a, b string) bool {
 	return subtle.ConstantTimeCompare(ha[:], hb[:]) == 1
 }
 
-// loginLimiter counts failed logins in a sliding window. It is global rather
+// rateLimiter counts events in a sliding window. Limits are global rather
 // than per client IP: there is one user, and IPs behind a proxy or tunnel
 // can't be trusted.
-type loginLimiter struct {
-	mu       sync.Mutex
-	failures []time.Time
+type rateLimiter struct {
+	mu     sync.Mutex
+	max    int
+	window time.Duration
+	events []time.Time
 }
 
-func newLoginLimiter() *loginLimiter {
-	return &loginLimiter{}
+func newRateLimiter(max int, window time.Duration) *rateLimiter {
+	return &rateLimiter{max: max, window: window}
 }
 
-func (l *loginLimiter) locked(now time.Time) bool {
+// full reports whether the window already holds max events.
+func (l *rateLimiter) full(now time.Time) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.prune(now)
-	return len(l.failures) >= maxFailedLogins
+	return len(l.events) >= l.max
 }
 
-func (l *loginLimiter) fail(now time.Time) {
+func (l *rateLimiter) record(now time.Time) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.prune(now)
-	l.failures = append(l.failures, now)
+	l.events = append(l.events, now)
 }
 
-func (l *loginLimiter) prune(now time.Time) {
-	cutoff := now.Add(-failedLoginWindow)
+func (l *rateLimiter) prune(now time.Time) {
+	cutoff := now.Add(-l.window)
 	i := 0
-	for i < len(l.failures) && l.failures[i].Before(cutoff) {
+	for i < len(l.events) && l.events[i].Before(cutoff) {
 		i++
 	}
-	l.failures = l.failures[i:]
+	l.events = l.events[i:]
 }

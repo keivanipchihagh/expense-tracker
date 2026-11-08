@@ -293,6 +293,21 @@ func TestOAuthFlow(t *testing.T) {
 	assert.Equal(t, "invalid_grant", oauthErr["error"], "a refresh token works only once")
 }
 
+func TestOAuthFlow_RefreshWithWrongClientDoesNotBurnToken(t *testing.T) {
+	s := newTestServer(t)
+	clientId := s.register(t)
+	otherId := s.register(t)
+
+	status, tok, _ := s.tokenRequest(t, codeGrant(clientId, s.authorize(t, clientId)))
+	require.Equal(t, http.StatusOK, status)
+
+	status, _, _ = s.tokenRequest(t, url.Values{"grant_type": {"refresh_token"}, "client_id": {otherId}, "refresh_token": {tok.RefreshToken}})
+	assert.Equal(t, http.StatusBadRequest, status)
+
+	status, _, _ = s.tokenRequest(t, url.Values{"grant_type": {"refresh_token"}, "client_id": {clientId}, "refresh_token": {tok.RefreshToken}})
+	assert.Equal(t, http.StatusOK, status, "the real owner can still refresh")
+}
+
 func TestOAuthFlow_WrongVerifier(t *testing.T) {
 	s := newTestServer(t)
 	clientId := s.register(t)

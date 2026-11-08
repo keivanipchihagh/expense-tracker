@@ -21,6 +21,12 @@ type OAuthRepository interface {
 	CreateClient(ctx context.Context, client models.OAuthClient) error
 	// GetClient returns the client with the given id, or ErrOAuthNotFound.
 	GetClient(ctx context.Context, id string) (models.OAuthClient, error)
+	// ListConnectedApps returns clients holding a token that is valid at
+	// now, most recently active first.
+	ListConnectedApps(ctx context.Context, now time.Time) ([]models.ConnectedApp, error)
+	// DeleteClient removes the client with all its codes and tokens, so it
+	// loses access at once. Returns ErrOAuthNotFound if missing.
+	DeleteClient(ctx context.Context, id string) error
 
 	CreateCode(ctx context.Context, code models.OAuthCode) error
 	// ConsumeCode deletes and returns the code in one statement, so a code
@@ -35,13 +41,18 @@ type OAuthRepository interface {
 	// statement, so a refresh token can be used at most once.
 	ConsumeToken(ctx context.Context, tokenHash string, kind models.OAuthTokenKind) (models.OAuthToken, error)
 
-	// DeleteExpired removes codes and tokens that expired before now.
+	// DeleteExpired removes codes and tokens that expired before now, and
+	// clients that registered over unusedClientTTL ago and hold nothing.
 	DeleteExpired(ctx context.Context, now time.Time) error
 }
 
 type OAuthRepositoryImpl struct {
 	client *sqlite.Client
 }
+
+// unusedClientTTL is how long a registered client may exist without ever
+// holding a code or token. Registration is open, so this bounds junk rows.
+const unusedClientTTL = 24 * time.Hour
 
 // Timestamps are unix seconds so expiry checks are plain integer comparisons.
 var oauthSchema = []string{
@@ -125,6 +136,60 @@ func (r *OAuthRepositoryImpl) GetClient(ctx context.Context, id string) (models.
 	return c, nil
 }
 
+func (r *OAuthRepositoryImpl) ListConnectedApps(ctx context.Context, now time.Time) ([]models.ConnectedApp, error) {
+	rows, err := r.client.QueryContext(ctx, `
+		SELECT c.id, c.name, c.redirect_uris, c.auth_method, c.created_at, MAX(t.created_at)
+		FROM oauth_clients c
+		JOIN oauth_tokens t ON t.client_id = c.id
+		WHERE t.expires_at > ?
+		GROUP BY c.id
+		ORDER BY MAX(t.created_at) DESC, c.id`, now.Unix())
+	if err != nil {
+		return nil, fmt.Errorf("list connected apps: %w", err)
+	}
+	defer rows.Close()
+
+	apps := []models.ConnectedApp{}
+	for rows.Next() {
+		var (
+			a                       models.ConnectedApp
+			uris                    string
+			createdAt, lastActiveAt int64
+		)
+		if err := rows.Scan(&a.Client.Id, &a.Client.Name, &uris, &a.Client.AuthMethod, &createdAt, &lastActiveAt); err != nil {
+			return nil, fmt.Errorf("scan connected app: %w", err)
+		}
+		if err := json.Unmarshal([]byte(uris), &a.Client.RedirectUris); err != nil {
+			return nil, fmt.Errorf("decode redirect uris: %w", err)
+		}
+		a.Client.CreatedAt = time.Unix(createdAt, 0).UTC()
+		a.LastActiveAt = time.Unix(lastActiveAt, 0).UTC()
+		apps = append(apps, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list connected apps: %w", err)
+	}
+	return apps, nil
+}
+
+func (r *OAuthRepositoryImpl) DeleteClient(ctx context.Context, id string) error {
+	return r.client.WithTx(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, "DELETE FROM oauth_clients WHERE id = ?", id)
+		if err != nil {
+			return fmt.Errorf("delete oauth client: %w", err)
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return ErrOAuthNotFound
+		}
+		for _, table := range []string{"oauth_codes", "oauth_tokens"} {
+			if _, err := tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE client_id = ?", id); err != nil {
+				return fmt.Errorf("delete client rows from %s: %w", table, err)
+			}
+		}
+		return nil
+	})
+}
+
 func (r *OAuthRepositoryImpl) CreateCode(ctx context.Context, c models.OAuthCode) error {
 	_, err := r.client.ExecContext(ctx,
 		`INSERT INTO oauth_codes (code_hash, client_id, redirect_uri, code_challenge, expires_at)
@@ -189,6 +254,14 @@ func (r *OAuthRepositoryImpl) DeleteExpired(ctx context.Context, now time.Time) 
 			if _, err := tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE expires_at < ?", now.Unix()); err != nil {
 				return fmt.Errorf("delete expired from %s: %w", table, err)
 			}
+		}
+		_, err := tx.ExecContext(ctx, `
+			DELETE FROM oauth_clients
+			WHERE created_at < ?
+			  AND id NOT IN (SELECT client_id FROM oauth_tokens)
+			  AND id NOT IN (SELECT client_id FROM oauth_codes)`, now.Add(-unusedClientTTL).Unix())
+		if err != nil {
+			return fmt.Errorf("delete unused oauth clients: %w", err)
 		}
 		return nil
 	})

@@ -18,11 +18,11 @@ const sessionTTL = 30 * 24 * time.Hour
 // the same lockout as the OAuth login page.
 func (h *Handler) Login(ctx context.Context, password string) (string, time.Time, error) {
 	now := h.now()
-	if h.logins.locked(now) {
+	if h.logins.full(now) {
 		return "", time.Time{}, ErrTooManyLogins
 	}
 	if !secretsEqual(password, h.password) {
-		h.logins.fail(now)
+		h.logins.record(now)
 		h.logger.WarnContext(ctx, "ui login failed: wrong password")
 		return "", time.Time{}, ErrWrongPassword
 	}

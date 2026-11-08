@@ -11,3 +11,4 @@ deploy/
 .coverage/
 Makefile
 scripts/
+.claude

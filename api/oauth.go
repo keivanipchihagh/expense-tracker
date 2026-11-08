@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/keivanipchihagh/expense-tracker/internal/handler"
 	"github.com/keivanipchihagh/expense-tracker/pkg"
@@ -15,9 +16,12 @@ import (
 
 // ProtectedResourceMetadata handles /.well-known/oauth-protected-resource
 // (RFC 9728): it tells clients which authorization server issues tokens.
+// A path after the well-known prefix names the resource, so the document
+// for /mcp says its resource is <public url>/mcp.
 func (s *Server) ProtectedResourceMetadata(w http.ResponseWriter, r *http.Request) {
+	resource := s.publicUrl + strings.TrimPrefix(r.URL.Path, "/.well-known/oauth-protected-resource")
 	writeJson(w, http.StatusOK, map[string]any{
-		"resource":                 s.publicUrl,
+		"resource":                 resource,
 		"authorization_servers":    []string{s.publicUrl},
 		"bearer_methods_supported": []string{"header"},
 		"resource_name":            "expense-tracker",

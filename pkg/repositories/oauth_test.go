@@ -103,6 +103,69 @@ func TestOAuthRepository_CreateTokensIsAtomic(t *testing.T) {
 	assert.ErrorIs(t, err, ErrOAuthNotFound, "the failed batch stored nothing")
 }
 
+func TestOAuthRepository_ConnectedApps(t *testing.T) {
+	repo := newTestOAuthRepo(t)
+	ctx := context.Background()
+
+	for _, id := range []string{"claude", "chatgpt", "idle", "expired"} {
+		require.NoError(t, repo.CreateClient(ctx, models.OAuthClient{Id: id, Name: id, RedirectUris: []string{"https://" + id + "/cb"}, AuthMethod: models.AuthMethodNone, CreatedAt: oauthNow}))
+	}
+	tok := func(hash, client string, created, expires time.Time) models.OAuthToken {
+		return models.OAuthToken{TokenHash: hash, Kind: models.OAuthTokenRefresh, ClientId: client, CreatedAt: created, ExpiresAt: expires}
+	}
+	require.NoError(t, repo.CreateTokens(ctx,
+		tok("c1", "claude", oauthNow.Add(-2*time.Hour), oauthNow.Add(time.Hour)),
+		tok("c2", "claude", oauthNow.Add(-time.Hour), oauthNow.Add(time.Hour)),
+		tok("g1", "chatgpt", oauthNow.Add(-30*time.Minute), oauthNow.Add(time.Hour)),
+		tok("e1", "expired", oauthNow.Add(-48*time.Hour), oauthNow.Add(-time.Hour)),
+	))
+
+	apps, err := repo.ListConnectedApps(ctx, oauthNow)
+	require.NoError(t, err)
+	require.Len(t, apps, 2, "clients without a valid token are not connected")
+	assert.Equal(t, "chatgpt", apps[0].Client.Id, "most recently active first")
+	assert.Equal(t, "claude", apps[1].Client.Id)
+	assert.Equal(t, oauthNow.Add(-time.Hour), apps[1].LastActiveAt)
+	assert.Equal(t, []string{"https://claude/cb"}, apps[1].Client.RedirectUris)
+
+	require.NoError(t, repo.CreateCode(ctx, models.OAuthCode{CodeHash: "code", ClientId: "claude", ExpiresAt: oauthNow.Add(time.Minute)}))
+	require.NoError(t, repo.DeleteClient(ctx, "claude"))
+
+	_, err = repo.GetClient(ctx, "claude")
+	assert.ErrorIs(t, err, ErrOAuthNotFound)
+	_, err = repo.GetToken(ctx, "c2", models.OAuthTokenRefresh)
+	assert.ErrorIs(t, err, ErrOAuthNotFound, "its tokens are gone")
+	_, err = repo.ConsumeCode(ctx, "code")
+	assert.ErrorIs(t, err, ErrOAuthNotFound, "its codes are gone")
+
+	assert.ErrorIs(t, repo.DeleteClient(ctx, "claude"), ErrOAuthNotFound)
+}
+
+func TestOAuthRepository_DeleteExpiredRemovesUnusedClients(t *testing.T) {
+	repo := newTestOAuthRepo(t)
+	ctx := context.Background()
+
+	old := oauthNow.Add(-unusedClientTTL - time.Minute)
+	for _, c := range []models.OAuthClient{
+		{Id: "old-unused", CreatedAt: old},
+		{Id: "old-with-token", CreatedAt: old},
+		{Id: "new-unused", CreatedAt: oauthNow},
+	} {
+		c.Name, c.RedirectUris, c.AuthMethod = c.Id, []string{"https://a/cb"}, models.AuthMethodNone
+		require.NoError(t, repo.CreateClient(ctx, c))
+	}
+	require.NoError(t, repo.CreateTokens(ctx, models.OAuthToken{TokenHash: "t", Kind: models.OAuthTokenRefresh, ClientId: "old-with-token", CreatedAt: old, ExpiresAt: oauthNow.Add(time.Hour)}))
+
+	require.NoError(t, repo.DeleteExpired(ctx, oauthNow))
+
+	_, err := repo.GetClient(ctx, "old-unused")
+	assert.ErrorIs(t, err, ErrOAuthNotFound)
+	_, err = repo.GetClient(ctx, "old-with-token")
+	assert.NoError(t, err)
+	_, err = repo.GetClient(ctx, "new-unused")
+	assert.NoError(t, err, "a client gets a day to finish signing in")
+}
+
 func TestOAuthRepository_DeleteExpired(t *testing.T) {
 	repo := newTestOAuthRepo(t)
 	ctx := context.Background()

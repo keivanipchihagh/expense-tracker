@@ -34,15 +34,20 @@ func NewServer(handler *handler.Handler, version, publicUrl string) *Server {
 	}
 }
 
-// Handler returns every route with authentication applied: the JSON API
-// requires a bearer token, the UI requires a session cookie.
+// Handler returns every route with authentication applied: the JSON API and
+// MCP require a bearer token, the UI requires a session cookie.
 func (s *Server) Handler() http.Handler {
-	auth := pkgHttp.BearerAuthMiddleware(
-		s.handler.ValidateAccessToken,
-		IsPublicPath,
-		s.publicUrl+"/.well-known/oauth-protected-resource",
-	)
+	auth := pkgHttp.BearerAuthMiddleware(s.handler.ValidateAccessToken, IsPublicPath, s.resourceMetadataUrl)
 	return auth(s.Routes())
+}
+
+// resourceMetadataUrl is where a client that got a 401 learns how to log in.
+// MCP clients get the metadata for the /mcp resource itself.
+func (s *Server) resourceMetadataUrl(r *http.Request) string {
+	if r.URL.Path == "/mcp" {
+		return s.publicUrl + "/.well-known/oauth-protected-resource/mcp"
+	}
+	return s.publicUrl + "/.well-known/oauth-protected-resource"
 }
 
 // Routes returns the handler with every route registered and no auth.
@@ -71,6 +76,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("PATCH /api/v1/expenses/{id}", s.UpdateExpense)
 	mux.HandleFunc("DELETE /api/v1/expenses/{id}", s.DeleteExpense)
 
+	// MCP (Streamable HTTP)
+	mux.Handle("/mcp", s.NewMcpHandler())
+
 	// UI: pages, HTMX fragments and static assets
 	mux.Handle("GET /static/", staticFiles())
 	mux.HandleFunc("GET /login", s.LoginPage)
@@ -83,13 +91,15 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /ui/expenses/{id}/edit", s.requireSession(s.EditExpenseForm))
 	mux.HandleFunc("POST /ui/expenses/{id}", s.requireSession(s.UpdateExpenseSubmit))
 	mux.HandleFunc("POST /ui/expenses/{id}/delete", s.requireSession(s.DeleteExpenseSubmit))
+	mux.HandleFunc("GET /apps", s.requireSession(s.AppsPage))
+	mux.HandleFunc("POST /ui/apps/{id}/revoke", s.requireSession(s.RevokeAppSubmit))
 
-	return mux
+	return errorPages(mux)
 }
 
 // IsPublicPath reports whether path is exempt from bearer-token auth. Only
-// the JSON API needs a token; the UI checks its session cookie itself, and
-// health, OAuth discovery and the OAuth endpoints are public.
+// the JSON API and MCP need a token; the UI checks its session cookie
+// itself, and health, OAuth discovery and the OAuth endpoints are public.
 func IsPublicPath(path string) bool {
-	return !strings.HasPrefix(path, "/api/")
+	return !strings.HasPrefix(path, "/api/") && path != "/mcp"
 }

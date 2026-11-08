@@ -151,6 +151,7 @@ func TestIsPublicPath(t *testing.T) {
 		"/.well-known/x":     true,
 		"/api/v1/expenses":   false,
 		"/api/v1/expenses/1": false,
+		"/mcp":               false,
 	} {
 		assert.Equal(t, want, IsPublicPath(path), path)
 	}
