@@ -5,6 +5,7 @@ Self-hosted expense log. Single user, SQLite, one Go binary, runs in Docker.
 ## Contents
 
 - [Run](#run)
+- [UI](#ui)
 - [Authentication](#authentication)
 - [Tables](#tables)
   - [Expense](#expense)
@@ -20,18 +21,28 @@ cp .env.template .env   # set AUTH_PASSWORD (openssl rand -base64 24)
 docker compose -f deploy/docker-compose.yaml --env-file .env up -d --build
 ```
 
-The database is stored in `data/expense.db`.
+The database is stored in `data/expense.db`. Stop the container before opening or copying it (see [Log](#log)).
+
+## UI
+
+Open `PUBLIC_URL` (by default http://localhost:8000) and sign in with `AUTH_PASSWORD`.
+
+- List expenses for a date range, with presets for this month, last month, this year and all time
+- Totals per currency, with a breakdown by category
+- Add, edit and delete expenses; time and time zone default to your browser's
+
+The UI is server-rendered (Go templates and [HTMX](https://htmx.org), bundled in the binary). Signing in sets an `HttpOnly`, `SameSite=Strict` session cookie valid for 30 days. The cookie only opens the UI; the JSON API always needs a bearer token.
 
 ## Authentication
 
-Every endpoint except `/health`, `/.well-known/*` and `/oauth/*` requires `Authorization: Bearer <access token>`. Tokens come from a built-in OAuth 2.1 server, the flow MCP clients such as Claude, ChatGPT and Gemini use:
+Every `/api/` endpoint requires `Authorization: Bearer <access token>`. Tokens come from a built-in OAuth 2.1 server, the flow MCP clients such as Claude, ChatGPT and Gemini use:
 
 1. The client calls the API, gets `401`, and finds the OAuth endpoints through `/.well-known/oauth-protected-resource`.
 2. It registers itself (`POST /oauth/register`) and opens `/oauth/authorize` in your browser.
 3. You sign in with `AUTH_PASSWORD`. The page shows which app is asking and where it will redirect.
 4. The client exchanges the one-time code for an access token (valid 1 hour) and a refresh token (30 days, single use).
 
-PKCE (S256) is required. Tokens and codes are stored only as hashes. After 10 wrong passwords in 15 minutes, the login page is locked for the rest of that window.
+PKCE (S256) is required. Tokens and codes are stored only as hashes. After 10 wrong passwords in 15 minutes (on this page or the UI sign-in), both are locked for the rest of that window.
 
 Clients connecting from the internet (ChatGPT, claude.ai, Gemini) need `PUBLIC_URL` set to an HTTPS address that reaches the server, e.g. a Cloudflare Tunnel.
 
@@ -75,8 +86,11 @@ One row per change to an expense, in the `logs` table. A log row is written in t
 | `created_at` | UTC |
 
 ```bash
+docker compose -f deploy/docker-compose.yaml --env-file .env stop
 sqlite3 data/expense.db "SELECT action, before, after FROM logs WHERE expense_id = '<id>' ORDER BY id"
 ```
+
+> **Stop the container before opening `data/expense.db` from the host.** SQLite runs in WAL mode, which coordinates readers and writers through shared memory and only works when all of them run on the same machine. On Docker Desktop the container runs in a VM, so a host `sqlite3` and the running container can corrupt the database. The same goes for copying the file as a backup.
 
 ## API
 

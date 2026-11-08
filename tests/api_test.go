@@ -58,13 +58,15 @@ func newTestServer(t *testing.T) *testServer {
 	require.NoError(t, err)
 	oauthRepo, err := repositories.NewOAuthRepository(ctx, db)
 	require.NoError(t, err)
+	sessionRepo, err := repositories.NewSessionRepository(ctx, db)
+	require.NoError(t, err)
 
 	// The public URL is the test server's own address, known only once it runs.
 	var routes http.Handler
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { routes.ServeHTTP(w, r) }))
 	t.Cleanup(srv.Close)
 
-	h := handler.NewHandler(expenseRepo, oauthRepo, srv.URL, password)
+	h := handler.NewHandler(expenseRepo, oauthRepo, sessionRepo, srv.URL, password)
 	routes = pkgHttp.NewHttpServer(api.NewServer(h, "test", srv.URL).Handler(), 5*time.Second, 1<<20).Handler
 
 	return &testServer{url: srv.URL, db: db}

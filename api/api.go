@@ -13,6 +13,8 @@ type Server struct {
 	handler   *handler.Handler
 	version   string
 	publicUrl string
+	// secureCookies marks the session cookie Secure when served over HTTPS.
+	secureCookies bool
 }
 
 // NewServer creates the API server. version is reported by /health;
@@ -24,11 +26,16 @@ func NewServer(handler *handler.Handler, version, publicUrl string) *Server {
 	if version == "" || publicUrl == "" {
 		panic("api: version and public url must not be empty")
 	}
-	return &Server{handler: handler, version: version, publicUrl: strings.TrimSuffix(publicUrl, "/")}
+	return &Server{
+		handler:       handler,
+		version:       version,
+		publicUrl:     strings.TrimSuffix(publicUrl, "/"),
+		secureCookies: strings.HasPrefix(publicUrl, "https://"),
+	}
 }
 
-// Handler returns every route behind bearer-token auth. Paths that
-// IsPublicPath accepts are reachable without a token.
+// Handler returns every route with authentication applied: the JSON API
+// requires a bearer token, the UI requires a session cookie.
 func (s *Server) Handler() http.Handler {
 	auth := pkgHttp.BearerAuthMiddleware(
 		s.handler.ValidateAccessToken,
@@ -64,13 +71,25 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("PATCH /api/v1/expenses/{id}", s.UpdateExpense)
 	mux.HandleFunc("DELETE /api/v1/expenses/{id}", s.DeleteExpense)
 
+	// UI: pages, HTMX fragments and static assets
+	mux.Handle("GET /static/", staticFiles())
+	mux.HandleFunc("GET /login", s.LoginPage)
+	mux.HandleFunc("POST /login", s.LoginSubmit)
+	mux.HandleFunc("POST /logout", s.Logout)
+	mux.HandleFunc("GET /{$}", s.requireSession(s.IndexPage))
+	mux.HandleFunc("GET /ui/expenses", s.requireSession(s.ResultsPartial))
+	mux.HandleFunc("GET /ui/expenses/new", s.requireSession(s.NewExpenseForm))
+	mux.HandleFunc("POST /ui/expenses", s.requireSession(s.CreateExpenseSubmit))
+	mux.HandleFunc("GET /ui/expenses/{id}/edit", s.requireSession(s.EditExpenseForm))
+	mux.HandleFunc("POST /ui/expenses/{id}", s.requireSession(s.UpdateExpenseSubmit))
+	mux.HandleFunc("POST /ui/expenses/{id}/delete", s.requireSession(s.DeleteExpenseSubmit))
+
 	return mux
 }
 
-// IsPublicPath reports whether path is reachable without an access token:
-// the health check, OAuth discovery and the OAuth endpoints themselves.
+// IsPublicPath reports whether path is exempt from bearer-token auth. Only
+// the JSON API needs a token; the UI checks its session cookie itself, and
+// health, OAuth discovery and the OAuth endpoints are public.
 func IsPublicPath(path string) bool {
-	return path == "/health" ||
-		strings.HasPrefix(path, "/.well-known/") ||
-		strings.HasPrefix(path, "/oauth/")
+	return !strings.HasPrefix(path, "/api/")
 }

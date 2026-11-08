@@ -1,0 +1,66 @@
+{{define "results"}}
+<div id="range" hidden>
+  <input type="hidden" name="from" value="{{.Range.From}}">
+  <input type="hidden" name="to" value="{{.Range.To}}">
+</div>
+
+<p class="range-label">{{.Range.Label}}</p>
+
+{{if .Totals}}
+<section class="totals">
+  {{range .Totals}}
+  {{$symbol := .Symbol}}
+  <article class="card total" aria-label="{{.Currency}} total">
+    <header>
+      <span class="total-amount">{{.Symbol}}{{.Total}}</span>
+      <span class="muted">{{.Count}} expense{{if ne .Count 1}}s{{end}}</span>
+    </header>
+    <ul class="breakdown">
+      {{range .Categories}}
+      <li>
+        <span class="cat">{{.Category}}</span>
+        <meter class="bar" min="0" max="100" value="{{.Percent}}" aria-hidden="true"></meter>
+        <span class="num">{{$symbol}}{{.Total}}</span>
+      </li>
+      {{end}}
+    </ul>
+  </article>
+  {{end}}
+</section>
+{{end}}
+
+{{if .Rows}}
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Category</th>
+        <th>Merchant</th>
+        <th>Note</th>
+        <th class="num">Amount</th>
+        <th><span class="sr-only">Actions</span></th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .Rows}}
+      <tr>
+        <td><span class="date">{{.Date}}</span> <span class="muted">{{.Time}} {{.Offset}}</span></td>
+        <td><span class="tag">{{.Category}}</span></td>
+        <td>{{.Merchant}}</td>
+        <td class="note">{{.Note}}</td>
+        <td class="num" title="{{.Currency}}">{{.Symbol}}{{.Amount}}</td>
+        <td class="actions">
+          <button class="link" hx-get="/ui/expenses/{{.Id}}/edit" hx-include="#range" hx-target="#editor">Edit</button>
+          <button class="link danger" hx-post="/ui/expenses/{{.Id}}/delete" hx-include="#range" hx-target="#editor"
+                  hx-confirm="Delete this expense? This can't be undone.">Delete</button>
+        </td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+</div>
+{{else}}
+<p class="empty">No expenses in this range.</p>
+{{end}}
+{{end}}

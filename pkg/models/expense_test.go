@@ -38,6 +38,16 @@ func TestExpense_JSON(t *testing.T) {
 	}`, string(b), "occurred_at keeps its offset; unset optional fields are null")
 }
 
+func TestCurrency_Symbol(t *testing.T) {
+	assert.Equal(t, "$", CurrencyUSD.Symbol())
+	assert.Equal(t, "€", CurrencyEUR.Symbol())
+	assert.Equal(t, "GBP", Currency("GBP").Symbol(), "falls back to the code")
+
+	for _, c := range Currencies {
+		assert.NotEqual(t, string(c), c.Symbol(), "every accepted currency has a symbol: %s", c)
+	}
+}
+
 func TestIsValid(t *testing.T) {
 	assert.True(t, CurrencyEUR.IsValid())
 	assert.False(t, Currency("GBP").IsValid())

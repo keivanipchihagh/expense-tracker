@@ -17,6 +17,21 @@ const (
 // Currencies lists the accepted currencies.
 var Currencies = []Currency{CurrencyUSD, CurrencyEUR}
 
+// currencySymbols maps each accepted currency to its symbol.
+var currencySymbols = map[Currency]string{
+	CurrencyUSD: "$",
+	CurrencyEUR: "€",
+}
+
+// Symbol returns the currency's symbol, e.g. "€", or the code itself for a
+// currency without one.
+func (c Currency) Symbol() string {
+	if s, ok := currencySymbols[c]; ok {
+		return s
+	}
+	return string(c)
+}
+
 // Category is what kind of spending an expense is.
 type Category string
 

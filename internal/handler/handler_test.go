@@ -18,6 +18,7 @@ type HandlerTestSuite struct {
 	handler     *Handler
 	expenseRepo *repositories.MockExpenseRepository
 	oauthRepo   *repositories.MockOAuthRepository
+	sessionRepo *repositories.MockSessionRepository
 }
 
 const (
@@ -30,11 +31,13 @@ func setupHandlerTestSuite(t *testing.T) *HandlerTestSuite {
 	ctrl := gomock.NewController(t)
 	expenseRepo := repositories.NewMockExpenseRepository(ctrl)
 	oauthRepo := repositories.NewMockOAuthRepository(ctrl)
+	sessionRepo := repositories.NewMockSessionRepository(ctrl)
 
 	return &HandlerTestSuite{
-		handler:     NewHandler(expenseRepo, oauthRepo, testPublicUrl, testPassword),
+		handler:     NewHandler(expenseRepo, oauthRepo, sessionRepo, testPublicUrl, testPassword),
 		expenseRepo: expenseRepo,
 		oauthRepo:   oauthRepo,
+		sessionRepo: sessionRepo,
 	}
 }
 
@@ -42,9 +45,11 @@ func TestNewHandler_Panics(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	expenseRepo := repositories.NewMockExpenseRepository(ctrl)
 	oauthRepo := repositories.NewMockOAuthRepository(ctrl)
+	sessionRepo := repositories.NewMockSessionRepository(ctrl)
 
-	assert.Panics(t, func() { NewHandler(nil, oauthRepo, testPublicUrl, testPassword) })
-	assert.Panics(t, func() { NewHandler(expenseRepo, nil, testPublicUrl, testPassword) })
-	assert.Panics(t, func() { NewHandler(expenseRepo, oauthRepo, "", testPassword) })
-	assert.Panics(t, func() { NewHandler(expenseRepo, oauthRepo, testPublicUrl, "") })
+	assert.Panics(t, func() { NewHandler(nil, oauthRepo, sessionRepo, testPublicUrl, testPassword) })
+	assert.Panics(t, func() { NewHandler(expenseRepo, nil, sessionRepo, testPublicUrl, testPassword) })
+	assert.Panics(t, func() { NewHandler(expenseRepo, oauthRepo, nil, testPublicUrl, testPassword) })
+	assert.Panics(t, func() { NewHandler(expenseRepo, oauthRepo, sessionRepo, "", testPassword) })
+	assert.Panics(t, func() { NewHandler(expenseRepo, oauthRepo, sessionRepo, testPublicUrl, "") })
 }

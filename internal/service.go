@@ -55,12 +55,16 @@ func Run() {
 	if err != nil {
 		fatal("failed to initialize oauth repository", "error", err)
 	}
+	sessionRepo, err := repositories.NewSessionRepository(ctx, db)
+	if err != nil {
+		fatal("failed to initialize session repository", "error", err)
+	}
 
 	// Initialize handler and API
-	h := handler.NewHandler(expenseRepo, oauthRepo, cfg.PublicUrl, cfg.AuthPassword)
+	h := handler.NewHandler(expenseRepo, oauthRepo, sessionRepo, cfg.PublicUrl, cfg.AuthPassword)
 	server := api.NewServer(h, cfg.AppVersion, cfg.PublicUrl)
 
-	// Start HTTP server; everything except health and OAuth requires a token
+	// Start HTTP server: the API needs a bearer token, the UI a session
 	httpServer := pkgHttp.NewHttpServer(server.Handler(), cfg.HttpRequestTimeout, cfg.HttpMaxBodyBytes)
 	addr := fmt.Sprintf("0.0.0.0:%d", cfg.HttpPort)
 	if err := httpServer.Start(addr); err != nil {
