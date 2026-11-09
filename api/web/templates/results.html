@@ -34,6 +34,15 @@
     {{range .CategoryOptions}}<option value="{{.}}" {{if eq . $.Filter.Category}}selected{{end}}>{{title .}}</option>{{end}}
   </select>
   <input type="search" name="merchant" value="{{.Filter.Merchant}}" placeholder="Merchant" aria-label="Merchant" maxlength="200" autocomplete="off">
+  {{if .Rows}}
+  <details class="export-menu">
+    <summary title="Export what the list shows">Export</summary>
+    <div class="menu">
+      <a href="/ui/export?{{.Filter.ExportQuery "csv"}}" download>CSV</a>
+      <a href="/ui/export?{{.Filter.ExportQuery "json"}}" download>JSON</a>
+    </div>
+  </details>
+  {{end}}
   {{if .Filter.Active}}
   <a class="clear-filters" href="/?{{.Filter.ClearQuery}}" hx-get="/ui/expenses?{{.Filter.ClearQuery}}" hx-target="#results" hx-push-url="/?{{.Filter.ClearQuery}}">Clear</a>
   {{end}}

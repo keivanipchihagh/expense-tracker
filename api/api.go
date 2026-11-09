@@ -92,6 +92,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /ui/expenses/{id}", s.requireSession(s.UpdateExpenseSubmit))
 	mux.HandleFunc("POST /ui/expenses/{id}/delete", s.requireSession(s.DeleteExpenseSubmit))
 	mux.HandleFunc("POST /ui/currency", s.requireSession(s.SetCurrencySubmit))
+	mux.HandleFunc("GET /ui/export", s.requireSession(s.ExportExpenses))
 	mux.HandleFunc("GET /analysis", s.requireSession(s.AnalysisPage))
 	mux.HandleFunc("GET /apps", s.requireSession(s.AppsPage))
 	mux.HandleFunc("POST /ui/apps/{id}/revoke", s.requireSession(s.RevokeAppSubmit))

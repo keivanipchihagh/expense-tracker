@@ -176,9 +176,18 @@ input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible
 /* Category and merchant filters. A set filter gets a stronger border. */
 .filter-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 24px; }
 .filter-bar select, .filter-bar input { min-height: 36px; padding: 6px 12px; border-radius: 999px; font-size: .9rem; }
-.filter-bar select { width: auto; flex: 0 1 170px; min-width: 0; }
+.filter-bar select { width: auto; flex: none; }
 .filter-bar input { flex: 1 1 auto; min-width: 0; }
 .filter-bar select.set, .filter-bar input:not(:placeholder-shown) { border-color: var(--text); }
+/* Export: a small dropdown at the end of the filter row. */
+.export-menu { position: relative; flex: none; order: 1; }
+.export-menu summary { list-style: none; cursor: pointer; padding: 6px 12px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); font-size: .9rem; line-height: 22px; background: var(--surface); }
+.export-menu summary::-webkit-details-marker { display: none; }
+.export-menu summary::after { content: " ▾"; font-size: .75rem; }
+.export-menu summary:hover, .export-menu[open] summary { color: var(--text); }
+.export-menu .menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 4; display: grid; min-width: 120px; padding: 4px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); box-shadow: var(--shadow); }
+.export-menu .menu a { padding: 7px 10px; border-radius: 6px; color: var(--text); font-size: .9rem; text-decoration: none; }
+.export-menu .menu a:hover, .export-menu .menu a:focus-visible { background: var(--subtle); }
 .clear-filters { flex: none; padding: 6px 8px; color: var(--muted); font-size: .9rem; }
 .clear-filters:hover { color: var(--text); }
 

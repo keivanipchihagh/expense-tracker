@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"encoding/json"
 	"io"
 	"maps"
 	"net/http"
@@ -409,6 +410,67 @@ func TestUI_Analysis(t *testing.T) {
 	require.Equal(t, http.StatusOK, status)
 	assert.Contains(t, page, `aria-current="true"
        hx-get="/analysis?period=month"`, "this month is selected")
+}
+
+func TestUI_Export(t *testing.T) {
+	s := newTestServer(t)
+	s.login(t)
+	for _, body := range []string{
+		`{"amount":"48.73","occurred_at":"2026-11-01T11:05:00+01:00","category":"groceries","merchant":"Rewe","note":"Weekly shop, with \"quotes\""}`,
+		`{"amount":"6.75","occurred_at":"2026-11-04T12:20:00-05:00","category":"food","merchant":"=HYPERLINK(\"http://evil\")"}`,
+		`{"amount":"99","occurred_at":"2026-10-31T12:00:00+01:00","category":"travel"}`,
+	} {
+		require.Equal(t, http.StatusCreated, s.call(t, http.MethodPost, "/api/v1/expenses", body, nil))
+	}
+
+	status, header, _ := send(t, browser(t), http.MethodGet, s.url+"/ui/export?format=csv", nil, nil)
+	assert.Equal(t, http.StatusSeeOther, status, "signed-out visitors go to the login page")
+	assert.Equal(t, "/login", header.Get("Location"))
+
+	c := browser(t)
+	signIn(t, s, c)
+	november := "from=2026-11-01&to=2026-11-30"
+
+	// The list links to both formats with its own dates and filters.
+	_, _, page := send(t, c, http.MethodGet, s.url+"/?"+november+"&category=groceries", nil, nil)
+	assert.Contains(t, page, `href="/ui/export?category=groceries&amp;format=csv&amp;from=2026-11-01&amp;to=2026-11-30" download>CSV</a>`)
+	assert.Contains(t, page, `href="/ui/export?category=groceries&amp;format=json&amp;from=2026-11-01&amp;to=2026-11-30" download>JSON</a>`)
+	assert.Contains(t, page, `<details class="export-menu">`, "a dropdown in the filter row")
+
+	_, _, empty := send(t, c, http.MethodGet, s.url+"/?from=2027-01-01&to=2027-01-31", nil, nil)
+	assert.NotContains(t, empty, "export-menu", "nothing to export, no menu")
+
+	// CSV
+	status, header, body := send(t, c, http.MethodGet, s.url+"/ui/export?format=csv&"+november, nil, nil)
+	require.Equal(t, http.StatusOK, status)
+	assert.Equal(t, "text/csv; charset=utf-8", header.Get("Content-Type"))
+	assert.Equal(t, `attachment; filename="expenses_2026-11-01_2026-11-30.csv"`, header.Get("Content-Disposition"))
+	lines := strings.Split(strings.TrimSpace(body), "\n")
+	require.Len(t, lines, 3, "a header and November's two expenses, oldest first")
+	assert.Equal(t, "id,occurred_at,amount,category,merchant,note,created_at,updated_at", lines[0])
+	assert.Contains(t, lines[1], `,2026-11-01T11:05:00+01:00,48.73,groceries,Rewe,"Weekly shop, with ""quotes""",`, "quoted per RFC 4180")
+	assert.Contains(t, lines[2], `,2026-11-04T12:20:00-05:00,6.75,food,"'=HYPERLINK(""http://evil"")",,`, "formulas are defused; the offset is kept")
+
+	// JSON, with the filters applied.
+	status, header, body = send(t, c, http.MethodGet, s.url+"/ui/export?format=json&"+november+"&merchant=rew", nil, nil)
+	require.Equal(t, http.StatusOK, status)
+	assert.Equal(t, "application/json; charset=utf-8", header.Get("Content-Type"))
+	assert.Equal(t, `attachment; filename="expenses_2026-11-01_2026-11-30.json"`, header.Get("Content-Disposition"))
+	var exported []map[string]any
+	require.NoError(t, json.Unmarshal([]byte(body), &exported))
+	require.Len(t, exported, 1)
+	assert.Equal(t, "48.73", exported[0]["amount"])
+	assert.Equal(t, "Rewe", exported[0]["merchant"])
+	assert.NotContains(t, exported[0], "currency")
+
+	// All time
+	_, header, body = send(t, c, http.MethodGet, s.url+"/ui/export?format=json&from=&to=", nil, nil)
+	assert.Equal(t, `attachment; filename="expenses_all.json"`, header.Get("Content-Disposition"))
+	require.NoError(t, json.Unmarshal([]byte(body), &exported))
+	assert.Len(t, exported, 3)
+
+	status, _, _ = send(t, c, http.MethodGet, s.url+"/ui/export?format=xlsx", nil, nil)
+	assert.Equal(t, http.StatusBadRequest, status)
 }
 
 func TestUI_RejectsCrossOriginPosts(t *testing.T) {

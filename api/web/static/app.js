@@ -41,7 +41,23 @@
     }
   });
 
+  // Dropdown menus (<details class="export-menu">) close on a choice, a
+  // click elsewhere, or Escape.
+  function closeMenus(except) {
+    document.querySelectorAll("details.export-menu[open]").forEach(function (menu) {
+      if (menu !== except) menu.removeAttribute("open");
+    });
+  }
+  document.addEventListener("click", function (event) {
+    var menu = event.target.closest("details.export-menu");
+    closeMenus(menu);
+    if (menu && event.target.closest(".menu a")) menu.removeAttribute("open");
+  });
+
   document.addEventListener("keydown", function (event) {
-    if (event.key === "Escape") closeEditor();
+    if (event.key === "Escape") {
+      closeEditor();
+      closeMenus(null);
+    }
   });
 })();
