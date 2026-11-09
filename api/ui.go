@@ -117,10 +117,10 @@ func (s *Server) Logout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
-// IndexPage handles GET /: the expense list for the requested date range.
+// IndexPage handles GET /: the expense list for the requested date range,
+// category and merchant.
 func (s *Server) IndexPage(w http.ResponseWriter, r *http.Request) {
-	rng := rangeFromQuery(r.URL.Query(), time.Now())
-	results, err := s.results(r, rng)
+	results, err := s.results(r, filterFromQuery(r.URL.Query(), time.Now()))
 	if err != nil {
 		s.renderUiError(w, r, err)
 		return
@@ -133,23 +133,24 @@ func (s *Server) IndexPage(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ResultsPartial handles GET /ui/expenses: the totals and table for a range.
+// ResultsPartial handles GET /ui/expenses: the totals and table for a
+// range and filters.
 func (s *Server) ResultsPartial(w http.ResponseWriter, r *http.Request) {
-	rng := rangeFromQuery(r.URL.Query(), time.Now())
-	results, err := s.results(r, rng)
+	filter := filterFromQuery(r.URL.Query(), time.Now())
+	results, err := s.results(r, filter)
 	if err != nil {
 		s.renderUiError(w, r, err)
 		return
 	}
-	// Keep the address bar in sync when the filter form is submitted.
-	w.Header().Set("HX-Push-Url", "/?"+url.Values{"from": {rng.From}, "to": {rng.To}}.Encode())
+	// Keep the address bar in sync when a filter form is submitted.
+	w.Header().Set("HX-Push-Url", "/?"+filter.query(filter.dateRange))
 	s.renderPartial(w, http.StatusOK, "results", results)
 }
 
 // NewExpenseForm handles GET /ui/expenses/new.
 func (s *Server) NewExpenseForm(w http.ResponseWriter, r *http.Request) {
 	s.renderPartial(w, http.StatusOK, "form", formData{
-		Range:  rangeFromQuery(r.URL.Query(), time.Now()),
+		Range:  filterFromQuery(r.URL.Query(), time.Now()),
 		Values: formValues{Currency: string(models.CurrencyEUR), Category: string(models.CategoryFood)},
 	})
 }
@@ -163,7 +164,7 @@ func (s *Server) EditExpenseForm(w http.ResponseWriter, r *http.Request) {
 	}
 	s.renderPartial(w, http.StatusOK, "form", formData{
 		Id:     e.Id,
-		Range:  rangeFromQuery(r.URL.Query(), time.Now()),
+		Range:  filterFromQuery(r.URL.Query(), time.Now()),
 		Values: formValuesFrom(e),
 	})
 }
@@ -188,7 +189,7 @@ func (s *Server) DeleteExpenseSubmit(w http.ResponseWriter, r *http.Request) {
 		s.renderUiError(w, r, err)
 		return
 	}
-	s.renderSaved(w, r, rangeFromQuery(r.PostForm, time.Now()))
+	s.renderSaved(w, r, filterFromQuery(r.PostForm, time.Now()))
 }
 
 // saveExpense creates (id == "") or updates an expense from the form. On a
@@ -198,7 +199,7 @@ func (s *Server) saveExpense(w http.ResponseWriter, r *http.Request, id string) 
 		http.Error(w, "bad form", http.StatusBadRequest)
 		return
 	}
-	rng := rangeFromQuery(r.PostForm, time.Now())
+	rng := filterFromQuery(r.PostForm, time.Now())
 	values := formValuesFromForm(r.PostForm)
 
 	input, fieldErrors := values.toInput()
@@ -229,7 +230,7 @@ func (s *Server) saveExpense(w http.ResponseWriter, r *http.Request, id string) 
 }
 
 // renderSaved closes the editor and refreshes the results in one response.
-func (s *Server) renderSaved(w http.ResponseWriter, r *http.Request, rng dateRange) {
+func (s *Server) renderSaved(w http.ResponseWriter, r *http.Request, rng listFilter) {
 	results, err := s.results(r, rng)
 	if err != nil {
 		s.renderUiError(w, r, err)
@@ -307,15 +308,25 @@ func sameOrigin(r *http.Request) bool {
 	return crossOrigin.Check(r) == nil
 }
 
-func (s *Server) results(r *http.Request, rng dateRange) (resultsData, error) {
-	from, _ := time.Parse(time.DateOnly, rng.From)
-	to, _ := time.Parse(time.DateOnly, rng.To)
-	expenses, err := s.handler.ListExpenses(r.Context(), from, to)
+func (s *Server) results(r *http.Request, filter listFilter) (resultsData, error) {
+	from, _ := time.Parse(time.DateOnly, filter.From)
+	to, _ := time.Parse(time.DateOnly, filter.To)
+	expenses, err := s.handler.ListExpenses(r.Context(), models.ExpenseFilter{
+		DateFrom: from,
+		DateTo:   to,
+		Category: models.Category(filter.Category),
+		Merchant: filter.Merchant,
+	})
 	if err != nil {
 		return resultsData{}, err
 	}
-	results := buildResults(rng, expenses)
-	results.Presets = presets(time.Now(), rng)
+	results := buildResults(filter.dateRange, expenses)
+	results.Filter = filter
+	results.Presets = presets(time.Now(), filter.dateRange)
+	for i := range results.Presets {
+		// Switching the date range keeps the category and merchant filters.
+		results.Presets[i].Query = template.URL(filter.query(results.Presets[i].dateRange))
+	}
 	return results, nil
 }
 
@@ -452,11 +463,56 @@ func currentMonth(now time.Time) dateRange {
 	return dateRange{From: first.Format(time.DateOnly), To: first.AddDate(0, 1, -1).Format(time.DateOnly)}
 }
 
+// listFilter is what the expense list shows: a date range plus optional
+// category and merchant filters.
+type listFilter struct {
+	dateRange
+	Category string
+	Merchant string
+}
+
+// filterFromQuery reads from/to (see rangeFromQuery), category and merchant.
+// An unknown category is dropped; the merchant search is trimmed and cut to
+// the merchant length limit.
+func filterFromQuery(v url.Values, now time.Time) listFilter {
+	f := listFilter{dateRange: rangeFromQuery(v, now)}
+	if c := models.Category(v.Get("category")); c.IsValid() {
+		f.Category = string(c)
+	}
+	f.Merchant = strings.TrimSpace(v.Get("merchant"))
+	if r := []rune(f.Merchant); len(r) > models.MaxMerchantLength {
+		f.Merchant = string(r[:models.MaxMerchantLength])
+	}
+	return f
+}
+
+// Active reports whether a category or merchant filter is set.
+func (f listFilter) Active() bool { return f.Category != "" || f.Merchant != "" }
+
+// query encodes rng with this filter's category and merchant, for links.
+func (f listFilter) query(rng dateRange) string {
+	v := url.Values{"from": {rng.From}, "to": {rng.To}}
+	if f.Category != "" {
+		v.Set("category", f.Category)
+	}
+	if f.Merchant != "" {
+		v.Set("merchant", f.Merchant)
+	}
+	return v.Encode()
+}
+
+// ClearQuery keeps the date range and drops the other filters.
+func (f listFilter) ClearQuery() template.URL {
+	return template.URL(listFilter{dateRange: f.dateRange}.query(f.dateRange))
+}
+
 type preset struct {
 	Label string
 	dateRange
 	// Active is true when the preset is the range being shown.
 	Active bool
+	// Query is the URL query for this range with the current filters.
+	Query template.URL
 }
 
 // presets returns the quick ranges, marking the one equal to current.
@@ -478,6 +534,7 @@ func presets(now time.Time, current dateRange) []preset {
 
 type resultsData struct {
 	Range   dateRange
+	Filter  listFilter
 	Presets []preset
 	Rows    []expenseRow
 	Days    []dayGroup
@@ -584,7 +641,7 @@ func buildResults(rng dateRange, expenses []models.Expense) resultsData {
 
 type formData struct {
 	Id     string
-	Range  dateRange
+	Range  listFilter
 	Values formValues
 	Errors map[string]string
 }
@@ -604,6 +661,9 @@ func (formData) Currencies() []currencyOption {
 	return out
 }
 func (formData) Categories() []string { return toStrings(models.Categories) }
+
+// CategoryOptions feeds the category filter's select box.
+func (resultsData) CategoryOptions() []string { return toStrings(models.Categories) }
 
 func toStrings[T ~string](values []T) []string {
 	out := make([]string, len(values))

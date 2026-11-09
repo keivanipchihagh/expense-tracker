@@ -12,7 +12,6 @@ package repositories
 import (
 	context "context"
 	reflect "reflect"
-	time "time"
 
 	models "github.com/keivanipchihagh/expense-tracker/pkg/models"
 	gomock "go.uber.org/mock/gomock"
@@ -86,18 +85,18 @@ func (mr *MockExpenseRepositoryMockRecorder) Get(ctx, id any) *gomock.Call {
 }
 
 // List mocks base method.
-func (m *MockExpenseRepository) List(ctx context.Context, dateFrom, dateTo time.Time) ([]models.Expense, error) {
+func (m *MockExpenseRepository) List(ctx context.Context, filter models.ExpenseFilter) ([]models.Expense, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "List", ctx, dateFrom, dateTo)
+	ret := m.ctrl.Call(m, "List", ctx, filter)
 	ret0, _ := ret[0].([]models.Expense)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // List indicates an expected call of List.
-func (mr *MockExpenseRepositoryMockRecorder) List(ctx, dateFrom, dateTo any) *gomock.Call {
+func (mr *MockExpenseRepositoryMockRecorder) List(ctx, filter any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "List", reflect.TypeOf((*MockExpenseRepository)(nil).List), ctx, dateFrom, dateTo)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "List", reflect.TypeOf((*MockExpenseRepository)(nil).List), ctx, filter)
 }
 
 // Update mocks base method.

@@ -186,36 +186,54 @@ func TestListExpenses(t *testing.T) {
 	from := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
 	to := time.Date(2026, 11, 30, 0, 0, 0, 0, time.UTC)
 
-	t.Run("passes the range through", func(t *testing.T) {
+	t.Run("passes the filter through", func(t *testing.T) {
 		ts := setupHandlerTestSuite(t)
 		want := []models.Expense{storedExpense()}
-		ts.expenseRepo.EXPECT().List(gomock.Any(), from, to).Return(want, nil)
+		ts.expenseRepo.EXPECT().List(gomock.Any(), models.ExpenseFilter{
+			DateFrom: from, DateTo: to, Category: models.CategoryGroceries, Merchant: "rewe",
+		}).Return(want, nil)
 
-		got, err := ts.handler.ListExpenses(context.Background(), from, to)
+		got, err := ts.handler.ListExpenses(context.Background(), models.ExpenseFilter{
+			DateFrom: from, DateTo: to, Category: models.CategoryGroceries, Merchant: "  rewe ",
+		})
 		require.NoError(t, err)
 		assert.Equal(t, want, got)
 	})
 
 	t.Run("same day is allowed", func(t *testing.T) {
 		ts := setupHandlerTestSuite(t)
-		ts.expenseRepo.EXPECT().List(gomock.Any(), from, from).Return([]models.Expense{}, nil)
+		ts.expenseRepo.EXPECT().List(gomock.Any(), models.ExpenseFilter{DateFrom: from, DateTo: from}).Return([]models.Expense{}, nil)
 
-		_, err := ts.handler.ListExpenses(context.Background(), from, from)
+		_, err := ts.handler.ListExpenses(context.Background(), models.ExpenseFilter{DateFrom: from, DateTo: from})
 		require.NoError(t, err)
 	})
 
-	t.Run("date_to before date_from", func(t *testing.T) {
+	t.Run("blank merchant doesn't filter", func(t *testing.T) {
+		ts := setupHandlerTestSuite(t)
+		ts.expenseRepo.EXPECT().List(gomock.Any(), models.ExpenseFilter{}).Return([]models.Expense{}, nil)
+
+		_, err := ts.handler.ListExpenses(context.Background(), models.ExpenseFilter{Merchant: "   "})
+		require.NoError(t, err)
+	})
+
+	t.Run("invalid filters", func(t *testing.T) {
 		ts := setupHandlerTestSuite(t)
 
-		_, err := ts.handler.ListExpenses(context.Background(), to, from)
-		assert.Equal(t, map[string]string{"date_to": "must not be before date_from"}, validationFields(t, err))
+		_, err := ts.handler.ListExpenses(context.Background(), models.ExpenseFilter{
+			DateFrom: to, DateTo: from, Category: "pets", Merchant: strings.Repeat("x", models.MaxMerchantLength+1),
+		})
+		assert.Equal(t, map[string]string{
+			"date_to":  "must not be before date_from",
+			"category": "must be one of " + joinValues(models.Categories),
+			"merchant": "must be at most 200 characters",
+		}, validationFields(t, err))
 	})
 
 	t.Run("database error", func(t *testing.T) {
 		ts := setupHandlerTestSuite(t)
-		ts.expenseRepo.EXPECT().List(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, errDatabase)
+		ts.expenseRepo.EXPECT().List(gomock.Any(), gomock.Any()).Return(nil, errDatabase)
 
-		_, err := ts.handler.ListExpenses(context.Background(), time.Time{}, time.Time{})
+		_, err := ts.handler.ListExpenses(context.Background(), models.ExpenseFilter{})
 		assert.Same(t, pkg.InternalError, err)
 	})
 }

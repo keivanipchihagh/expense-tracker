@@ -124,6 +124,17 @@ func TestMcp_ExpenseLifecycle(t *testing.T) {
 	require.Equal(t, 1, listed.Count)
 	assert.Equal(t, id, listed.Expenses[0]["id"])
 
+	// List by category and merchant (part of the name, any case)
+	text, isErr = callTool(t, session, "list_expenses", map[string]any{"category": "food", "merchant": "REW"})
+	require.False(t, isErr, text)
+	require.NoError(t, json.Unmarshal([]byte(text), &listed))
+	assert.Equal(t, 1, listed.Count)
+
+	text, isErr = callTool(t, session, "list_expenses", map[string]any{"category": "groceries", "merchant": "rewe"})
+	require.False(t, isErr, text)
+	require.NoError(t, json.Unmarshal([]byte(text), &listed))
+	assert.Equal(t, 0, listed.Count, "filters combine")
+
 	// Update: change the amount and clear the merchant with null
 	text, isErr = callTool(t, session, "update_expense", map[string]any{"id": id, "amount": "20", "merchant": nil})
 	require.False(t, isErr, text)
@@ -163,9 +174,15 @@ func TestMcp_ValidationErrorsAreReadable(t *testing.T) {
 		"- occurred_at: must be an RFC 3339 timestamp with a UTC offset, e.g. 2026-11-07T13:20:00+01:00\n"+
 		"- tip: unknown field", text, "every problem is listed so the agent can fix its call in one go")
 
-	text, isErr = callTool(t, session, "list_expenses", map[string]any{"date_from": "yesterday"})
+	text, isErr = callTool(t, session, "list_expenses", map[string]any{"date_from": "yesterday", "category": "pets", "merchant": 5, "limit": 3})
 	assert.True(t, isErr)
 	assert.Contains(t, text, "date_from: must be a date in YYYY-MM-DD format")
+	assert.Contains(t, text, "merchant: must be a string")
+	assert.Contains(t, text, "limit: unknown field")
+
+	text, isErr = callTool(t, session, "list_expenses", map[string]any{"category": "pets"})
+	assert.True(t, isErr)
+	assert.Contains(t, text, "category: must be one of")
 
 	text, isErr = callTool(t, session, "update_expense", map[string]any{"amount": "5"})
 	assert.True(t, isErr)

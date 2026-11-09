@@ -2,13 +2,15 @@
 <div id="range" hidden>
   <input type="hidden" name="from" value="{{.Range.From}}">
   <input type="hidden" name="to" value="{{.Range.To}}">
+  <input type="hidden" name="category" value="{{.Filter.Category}}">
+  <input type="hidden" name="merchant" value="{{.Filter.Merchant}}">
 </div>
 
 <div class="filters">
   <nav class="segmented" aria-label="Date range">
     {{range .Presets}}
-    <a href="/?from={{.From}}&amp;to={{.To}}" class="{{if .Active}}active{{end}}" {{if .Active}}aria-current="true"{{end}}
-       hx-get="/ui/expenses?from={{.From}}&amp;to={{.To}}" hx-target="#results" hx-push-url="/?from={{.From}}&amp;to={{.To}}">{{.Label}}</a>
+    <a href="/?{{.Query}}" class="{{if .Active}}active{{end}}" {{if .Active}}aria-current="true"{{end}}
+       hx-get="/ui/expenses?{{.Query}}" hx-target="#results" hx-push-url="/?{{.Query}}">{{.Label}}</a>
     {{end}}
   </nav>
   <details class="custom-range">
@@ -17,10 +19,25 @@
       <input type="date" name="from" value="{{.Range.From}}" aria-label="From">
       <span class="muted">to</span>
       <input type="date" name="to" value="{{.Range.To}}" aria-label="To">
+      <input type="hidden" name="category" value="{{.Filter.Category}}">
+      <input type="hidden" name="merchant" value="{{.Filter.Merchant}}">
       <button type="submit" class="small">Apply</button>
     </form>
   </details>
 </div>
+
+<form class="filter-bar" action="/" hx-get="/ui/expenses" hx-target="#results" hx-trigger="change, submit" hx-sync="this:replace" role="search">
+  <input type="hidden" name="from" value="{{.Range.From}}">
+  <input type="hidden" name="to" value="{{.Range.To}}">
+  <select name="category" aria-label="Category" class="{{if .Filter.Category}}set{{end}}">
+    <option value="">All categories</option>
+    {{range .CategoryOptions}}<option value="{{.}}" {{if eq . $.Filter.Category}}selected{{end}}>{{title .}}</option>{{end}}
+  </select>
+  <input type="search" name="merchant" value="{{.Filter.Merchant}}" placeholder="Merchant" aria-label="Merchant" maxlength="200" autocomplete="off">
+  {{if .Filter.Active}}
+  <a class="clear-filters" href="/?{{.Filter.ClearQuery}}" hx-get="/ui/expenses?{{.Filter.ClearQuery}}" hx-target="#results" hx-push-url="/?{{.Filter.ClearQuery}}">Clear</a>
+  {{end}}
+</form>
 
 {{if .Totals}}
 <section class="summary">
@@ -76,8 +93,13 @@
 </section>
 {{else}}
 <div class="empty">
+  {{if .Filter.Active}}
+  <p class="empty-title">No expenses match these filters.</p>
+  <p class="muted">Try another category or merchant, or clear the filters.</p>
+  {{else}}
   <p class="empty-title">No expenses in this range.</p>
   <p class="muted">Add one, or pick another range.</p>
+  {{end}}
 </div>
 {{end}}
 {{end}}

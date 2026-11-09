@@ -53,14 +53,25 @@ func (h *Handler) CreateExpense(ctx context.Context, input map[string]any) (mode
 	return expense, nil
 }
 
-// ListExpenses returns expenses whose local date is within [dateFrom,
-// dateTo], oldest first. A zero bound is open.
-func (h *Handler) ListExpenses(ctx context.Context, dateFrom, dateTo time.Time) ([]models.Expense, error) {
-	if !dateFrom.IsZero() && !dateTo.IsZero() && dateTo.Before(dateFrom) {
-		return nil, pkg.NewValidationError(map[string]string{"date_to": "must not be before date_from"})
+// ListExpenses returns expenses matching the filter, oldest first. The
+// merchant search is trimmed; an empty one doesn't filter.
+func (h *Handler) ListExpenses(ctx context.Context, filter models.ExpenseFilter) ([]models.Expense, error) {
+	errs := map[string]string{}
+	if !filter.DateFrom.IsZero() && !filter.DateTo.IsZero() && filter.DateTo.Before(filter.DateFrom) {
+		errs["date_to"] = "must not be before date_from"
+	}
+	if filter.Category != "" && !filter.Category.IsValid() {
+		errs["category"] = "must be one of " + joinValues(models.Categories)
+	}
+	filter.Merchant = strings.TrimSpace(filter.Merchant)
+	if utf8.RuneCountInString(filter.Merchant) > models.MaxMerchantLength {
+		errs["merchant"] = fmt.Sprintf("must be at most %d characters", models.MaxMerchantLength)
+	}
+	if len(errs) > 0 {
+		return nil, pkg.NewValidationError(errs)
 	}
 
-	expenses, err := h.expenseRepo.List(ctx, dateFrom, dateTo)
+	expenses, err := h.expenseRepo.List(ctx, filter)
 	if err != nil {
 		h.logger.ErrorContext(ctx, "list expenses failed", "error", err)
 		return nil, pkg.InternalError

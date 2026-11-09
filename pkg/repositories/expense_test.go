@@ -164,10 +164,64 @@ func TestExpenseRepository_List(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := repo.List(ctx, tt.from, tt.to)
+			got, err := repo.List(ctx, models.ExpenseFilter{DateFrom: tt.from, DateTo: tt.to})
 			require.NoError(t, err)
 			assert.NotNil(t, got)
 			assert.Equal(t, tt.want, ids(got))
+		})
+	}
+}
+
+func TestExpenseRepository_ListFilters(t *testing.T) {
+	repo, _ := newTestExpenseRepo(t)
+	ctx := context.Background()
+
+	add := func(id, occurredAt string, category models.Category, merchant *string) {
+		e := newExpense(id, occurredAt)
+		e.Category = category
+		e.Merchant = merchant
+		require.NoError(t, repo.Create(ctx, e))
+	}
+	add("rewe-city", "2026-11-01T10:00:00+01:00", models.CategoryGroceries, new("Rewe City"))
+	add("rewe-upper", "2026-11-02T10:00:00+01:00", models.CategoryFood, new("REWE"))
+	add("aldi", "2026-11-03T10:00:00+01:00", models.CategoryGroceries, new("Aldi"))
+	add("no-merchant", "2026-11-04T10:00:00+01:00", models.CategoryGroceries, nil)
+	add("percent", "2026-11-05T10:00:00+01:00", models.CategoryShopping, new("100% Shop"))
+	add("underscore", "2026-11-06T10:00:00+01:00", models.CategoryShopping, new("a_b"))
+	add("rewe-december", "2026-12-01T10:00:00+01:00", models.CategoryGroceries, new("Rewe"))
+
+	november := models.ExpenseFilter{
+		DateFrom: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC),
+		DateTo:   time.Date(2026, 11, 30, 0, 0, 0, 0, time.UTC),
+	}
+	with := func(f models.ExpenseFilter, category models.Category, merchant string) models.ExpenseFilter {
+		f.Category, f.Merchant = category, merchant
+		return f
+	}
+
+	tests := []struct {
+		name   string
+		filter models.ExpenseFilter
+		want   []string
+	}{
+		{name: "category", filter: with(november, models.CategoryGroceries, ""), want: []string{"rewe-city", "aldi", "no-merchant"}},
+		{name: "merchant part, ignoring case", filter: with(november, "", "rewe"), want: []string{"rewe-city", "rewe-upper"}},
+		{name: "category and merchant combine", filter: with(november, models.CategoryGroceries, "rewe"), want: []string{"rewe-city"}},
+		{name: "dates still apply", filter: with(models.ExpenseFilter{}, models.CategoryGroceries, "rewe"), want: []string{"rewe-city", "rewe-december"}},
+		{name: "percent is literal", filter: with(november, "", "%"), want: []string{"percent"}},
+		{name: "underscore is literal", filter: with(november, "", "_"), want: []string{"underscore"}},
+		{name: "backslash is literal", filter: with(november, "", `\`), want: []string{}},
+		{name: "no match", filter: with(november, models.CategoryTravel, ""), want: []string{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := repo.List(ctx, tt.filter)
+			require.NoError(t, err)
+			ids := []string{}
+			for _, e := range got {
+				ids = append(ids, e.Id)
+			}
+			assert.Equal(t, tt.want, ids)
 		})
 	}
 }

@@ -8,11 +8,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/keivanipchihagh/expense-tracker/pkg/db/sqlite"
 	"github.com/keivanipchihagh/expense-tracker/pkg/models"
 )
+
+// likeEscaper escapes LIKE wildcards (and the escape character itself).
+var likeEscaper = strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`)
 
 // ErrExpenseNotFound is returned when no expense has the given id.
 var ErrExpenseNotFound = errors.New("expense not found")
@@ -22,9 +26,9 @@ type ExpenseRepository interface {
 	Create(ctx context.Context, expense models.Expense) error
 	// Get returns the expense with the given id, or ErrExpenseNotFound.
 	Get(ctx context.Context, id string) (models.Expense, error)
-	// List returns expenses whose local date (the date part of occurred_at)
-	// is within [dateFrom, dateTo], oldest first. A zero bound is open.
-	List(ctx context.Context, dateFrom, dateTo time.Time) ([]models.Expense, error)
+	// List returns expenses matching the filter, oldest first. The dates
+	// bound the local date (the date part of occurred_at).
+	List(ctx context.Context, filter models.ExpenseFilter) ([]models.Expense, error)
 	// Update overwrites every column except id and created_at and writes an
 	// update log in one transaction. Returns ErrExpenseNotFound if missing.
 	Update(ctx context.Context, expense models.Expense) error
@@ -110,19 +114,28 @@ func (r *ExpenseRepositoryImpl) Get(ctx context.Context, id string) (models.Expe
 	return r.get(ctx, r.client, id)
 }
 
-func (r *ExpenseRepositoryImpl) List(ctx context.Context, dateFrom, dateTo time.Time) ([]models.Expense, error) {
+func (r *ExpenseRepositoryImpl) List(ctx context.Context, filter models.ExpenseFilter) ([]models.Expense, error) {
 	// occurred_at is stored as RFC 3339 text in its original offset, so it
 	// starts with the local date and plain string comparison filters by local
 	// date (and can use the index).
 	query := expenseSelect + " WHERE 1 = 1"
 	var args []any
-	if !dateFrom.IsZero() {
+	if !filter.DateFrom.IsZero() {
 		query += " AND occurred_at >= ?"
-		args = append(args, dateFrom.Format(time.DateOnly))
+		args = append(args, filter.DateFrom.Format(time.DateOnly))
 	}
-	if !dateTo.IsZero() {
+	if !filter.DateTo.IsZero() {
 		query += " AND occurred_at < ?"
-		args = append(args, dateTo.AddDate(0, 0, 1).Format(time.DateOnly))
+		args = append(args, filter.DateTo.AddDate(0, 0, 1).Format(time.DateOnly))
+	}
+	if filter.Category != "" {
+		query += " AND category = ?"
+		args = append(args, string(filter.Category))
+	}
+	if filter.Merchant != "" {
+		// LIKE ignores ASCII case. % and _ in the search are matched literally.
+		query += ` AND merchant LIKE ? ESCAPE '\'`
+		args = append(args, "%"+likeEscaper.Replace(filter.Merchant)+"%")
 	}
 	// julianday() converts every offset to the same instant, so the order is
 	// chronological even when expenses were recorded in different offsets.

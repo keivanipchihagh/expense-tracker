@@ -166,7 +166,16 @@ input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible
 
 /* Filters */
 
-.filters { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 24px; }
+.filters { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 12px; }
+
+/* Category and merchant filters. A set filter gets a stronger border. */
+.filter-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 24px; }
+.filter-bar select, .filter-bar input { min-height: 36px; padding: 6px 12px; border-radius: 999px; font-size: .9rem; }
+.filter-bar select { width: auto; flex: 0 1 170px; min-width: 0; }
+.filter-bar input { flex: 1 1 auto; min-width: 0; }
+.filter-bar select.set, .filter-bar input:not(:placeholder-shown) { border-color: var(--text); }
+.clear-filters { flex: none; padding: 6px 8px; color: var(--muted); font-size: .9rem; }
+.clear-filters:hover { color: var(--text); }
 
 .segmented { display: inline-flex; padding: 3px; gap: 2px; border-radius: 999px; background: var(--subtle); overflow-x: auto; max-width: 100%; }
 .segmented a {

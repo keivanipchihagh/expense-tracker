@@ -10,6 +10,8 @@
   <form {{if .Id}}hx-post="/ui/expenses/{{.Id}}"{{else}}hx-post="/ui/expenses"{{end}} hx-target="#editor">
     <input type="hidden" name="from" value="{{.Range.From}}">
     <input type="hidden" name="to" value="{{.Range.To}}">
+    <input type="hidden" name="category" value="{{.Range.Category}}">
+    <input type="hidden" name="merchant" value="{{.Range.Merchant}}">
     <input type="hidden" name="tz_offset" value="{{.Values.TzOffset}}">
 
     <div class="amount-field {{if or (index .Errors "amount") (index .Errors "currency")}}invalid{{end}}">

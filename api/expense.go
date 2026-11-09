@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/keivanipchihagh/expense-tracker/pkg"
+	"github.com/keivanipchihagh/expense-tracker/pkg/models"
 )
 
 // CreateExpense handles POST /api/v1/expenses.
@@ -25,17 +26,22 @@ func (s *Server) CreateExpense(w http.ResponseWriter, r *http.Request) {
 	writeJson(w, http.StatusCreated, expense)
 }
 
-// ListExpenses handles GET /api/v1/expenses?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD.
+// ListExpenses handles GET /api/v1/expenses with the optional query
+// parameters date_from and date_to (YYYY-MM-DD), category and merchant.
 func (s *Server) ListExpenses(w http.ResponseWriter, r *http.Request) {
 	fieldErrors := map[string]string{}
-	dateFrom := parseDateParam(r, "date_from", fieldErrors)
-	dateTo := parseDateParam(r, "date_to", fieldErrors)
+	filter := models.ExpenseFilter{
+		DateFrom: parseDateParam(r, "date_from", fieldErrors),
+		DateTo:   parseDateParam(r, "date_to", fieldErrors),
+		Category: models.Category(r.URL.Query().Get("category")),
+		Merchant: r.URL.Query().Get("merchant"),
+	}
 	if len(fieldErrors) > 0 {
 		writeError(w, http.StatusUnprocessableEntity, codeValidationFailed, "invalid query parameters", fieldErrors)
 		return
 	}
 
-	expenses, err := s.handler.ListExpenses(r.Context(), dateFrom, dateTo)
+	expenses, err := s.handler.ListExpenses(r.Context(), filter)
 	if err != nil {
 		writeHandlerError(w, r, err)
 		return

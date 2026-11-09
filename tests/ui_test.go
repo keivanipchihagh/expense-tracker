@@ -214,6 +214,51 @@ func TestUI_TotalsOnPage(t *testing.T) {
 	assert.Contains(t, page, `value="75"`, "groceries is 75% of EUR spending")
 }
 
+func TestUI_Filters(t *testing.T) {
+	s := newTestServer(t)
+	s.login(t)
+	for _, body := range []string{
+		`{"amount":"10","currency":"EUR","occurred_at":"2026-11-02T12:00:00+01:00","category":"groceries","merchant":"Rewe City"}`,
+		`{"amount":"30","currency":"EUR","occurred_at":"2026-11-03T12:00:00+01:00","category":"groceries","merchant":"Aldi"}`,
+		`{"amount":"5","currency":"EUR","occurred_at":"2026-11-04T12:00:00+01:00","category":"food","merchant":"REWE"}`,
+	} {
+		require.Equal(t, http.StatusCreated, s.call(t, http.MethodPost, "/api/v1/expenses", body, nil))
+	}
+	c := browser(t)
+	signIn(t, s, c)
+	hx := map[string]string{"HX-Request": "true"}
+
+	// Both filters combine, and the totals follow them.
+	status, header, page := send(t, c, http.MethodGet, s.url+"/ui/expenses?from=2026-11-01&to=2026-11-30&category=groceries&merchant=+rewe+", nil, hx)
+	require.Equal(t, http.StatusOK, status)
+	assert.Equal(t, "/?category=groceries&from=2026-11-01&merchant=rewe&to=2026-11-30", header.Get("HX-Push-Url"))
+	assert.Contains(t, page, "Rewe City")
+	assert.NotContains(t, page, "Aldi")
+	assert.NotContains(t, page, "€5.00")
+	assert.Contains(t, page, "€10.00")
+	assert.Contains(t, page, `<option value="groceries" selected>`)
+	assert.Contains(t, page, `name="merchant" value="rewe"`)
+
+	// Date presets and Clear keep or drop the filters.
+	assert.Contains(t, page, `href="/?category=groceries&amp;from=&amp;merchant=rewe&amp;to="`, "All time keeps the filters")
+	assert.Contains(t, page, `class="clear-filters" href="/?from=2026-11-01&amp;to=2026-11-30"`, "Clear keeps only the range")
+
+	// The add form carries the filters so saving returns to the same view.
+	status, _, form := send(t, c, http.MethodGet, s.url+"/ui/expenses/new?from=2026-11-01&to=2026-11-30&category=groceries&merchant=rewe", nil, hx)
+	require.Equal(t, http.StatusOK, status)
+	assert.Contains(t, form, `name="category" value="groceries"`)
+	assert.Contains(t, form, `name="merchant" value="rewe"`)
+
+	// An unknown category is ignored rather than failing the page.
+	status, _, page = send(t, c, http.MethodGet, s.url+"/?from=2026-11-01&to=2026-11-30&category=pets", nil, nil)
+	require.Equal(t, http.StatusOK, status)
+	assert.Contains(t, page, "Aldi")
+
+	status, _, page = send(t, c, http.MethodGet, s.url+"/?from=2026-11-01&to=2026-11-30&merchant=lidl", nil, nil)
+	require.Equal(t, http.StatusOK, status)
+	assert.Contains(t, page, "No expenses match these filters.")
+}
+
 func TestUI_RejectsCrossOriginPosts(t *testing.T) {
 	s := newTestServer(t)
 	c := browser(t)

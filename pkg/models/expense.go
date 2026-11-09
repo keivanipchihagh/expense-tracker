@@ -92,3 +92,15 @@ func (c Currency) IsValid() bool { return slices.Contains(Currencies, c) }
 
 // IsValid reports whether c is an accepted category.
 func (c Category) IsValid() bool { return slices.Contains(Categories, c) }
+
+// ExpenseFilter selects expenses to list. Zero fields don't filter.
+type ExpenseFilter struct {
+	// DateFrom and DateTo bound the local date (inclusive); zero is open.
+	DateFrom time.Time
+	DateTo   time.Time
+	// Category matches exactly.
+	Category Category
+	// Merchant matches any part of the merchant name, ignoring case
+	// (ASCII letters only, as SQLite's LIKE does).
+	Merchant string
+}

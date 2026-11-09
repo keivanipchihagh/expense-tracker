@@ -118,7 +118,7 @@ func TestListExpenses_Endpoint(t *testing.T) {
 		routes, repo := newTestRoutes(t)
 		from := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
 		to := time.Date(2026, 11, 30, 0, 0, 0, 0, time.UTC)
-		repo.EXPECT().List(gomock.Any(), from, to).Return([]models.Expense{sampleExpense()}, nil)
+		repo.EXPECT().List(gomock.Any(), models.ExpenseFilter{DateFrom: from, DateTo: to}).Return([]models.Expense{sampleExpense()}, nil)
 
 		rec := do(routes, http.MethodGet, "/api/v1/expenses?date_from=2026-11-01&date_to=2026-11-30", "")
 		require.Equal(t, http.StatusOK, rec.Code)
@@ -131,11 +131,28 @@ func TestListExpenses_Endpoint(t *testing.T) {
 
 	t.Run("empty list is [] not null", func(t *testing.T) {
 		routes, repo := newTestRoutes(t)
-		repo.EXPECT().List(gomock.Any(), time.Time{}, time.Time{}).Return([]models.Expense{}, nil)
+		repo.EXPECT().List(gomock.Any(), models.ExpenseFilter{}).Return([]models.Expense{}, nil)
 
 		rec := do(routes, http.MethodGet, "/api/v1/expenses", "")
 		require.Equal(t, http.StatusOK, rec.Code)
 		assert.Equal(t, "[]", strings.TrimSpace(rec.Body.String()))
+	})
+
+	t.Run("category and merchant filters", func(t *testing.T) {
+		routes, repo := newTestRoutes(t)
+		repo.EXPECT().List(gomock.Any(), models.ExpenseFilter{Category: models.CategoryGroceries, Merchant: "rewe city"}).
+			Return([]models.Expense{}, nil)
+
+		rec := do(routes, http.MethodGet, "/api/v1/expenses?category=groceries&merchant=rewe+city", "")
+		require.Equal(t, http.StatusOK, rec.Code)
+	})
+
+	t.Run("unknown category", func(t *testing.T) {
+		routes, _ := newTestRoutes(t)
+
+		rec := do(routes, http.MethodGet, "/api/v1/expenses?category=pets", "")
+		require.Equal(t, http.StatusUnprocessableEntity, rec.Code)
+		assert.Contains(t, decodeError(t, rec).Fields["category"], "must be one of")
 	})
 
 	t.Run("invalid date format", func(t *testing.T) {

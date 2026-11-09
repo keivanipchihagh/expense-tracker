@@ -28,7 +28,7 @@ const mcpInstructions = `Expense log for one person. Use these tools to record, 
 - merchant: the store or vendor, if known.
 - note: only extra words the user said about the expense. Leave it out otherwise; don't invent one.
 
-To fix a mistake, use update_expense with only the fields that change. To find an expense's id, call list_expenses for its date.`
+To fix a mistake, use update_expense with only the fields that change. To find an expense's id, call list_expenses for its date. To answer questions like "how much at Rewe this month?", filter list_expenses by merchant or category.`
 
 // NewMcpHandler returns the MCP endpoint (Streamable HTTP, stateless). It
 // exposes the same operations as the REST API and goes through the same
@@ -49,10 +49,12 @@ func (s *Server) NewMcpHandler() http.Handler {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "list_expenses",
-		Description: "List expenses whose local date is within the range, oldest first. Both dates are optional and inclusive.",
+		Description: "List expenses oldest first, optionally filtered by local date range, category and merchant. All filters are optional and combine.",
 		InputSchema: objectSchema(map[string]any{
-			"date_from": map[string]any{"type": "string", "format": "date", "description": "First local date, YYYY-MM-DD."},
-			"date_to":   map[string]any{"type": "string", "format": "date", "description": "Last local date, YYYY-MM-DD."},
+			"date_from": map[string]any{"type": "string", "format": "date", "description": "First local date, YYYY-MM-DD (inclusive)."},
+			"date_to":   map[string]any{"type": "string", "format": "date", "description": "Last local date, YYYY-MM-DD (inclusive)."},
+			"category":  map[string]any{"type": "string", "enum": toStrings(models.Categories), "description": "Only expenses in this category."},
+			"merchant":  map[string]any{"type": "string", "maxLength": models.MaxMerchantLength, "description": `Only expenses whose merchant contains this text, ignoring case, e.g. "rewe".`},
 		}),
 		Annotations: &mcp.ToolAnnotations{Title: "List expenses", ReadOnlyHint: true},
 	}, s.mcpListExpenses)
@@ -110,10 +112,16 @@ func (s *Server) mcpListExpenses(ctx context.Context, req *mcp.CallToolRequest) 
 	}
 
 	fieldErrors := map[string]string{}
-	from := dateArgument(args, "date_from", fieldErrors)
-	to := dateArgument(args, "date_to", fieldErrors)
+	filter := models.ExpenseFilter{
+		DateFrom: dateArgument(args, "date_from", fieldErrors),
+		DateTo:   dateArgument(args, "date_to", fieldErrors),
+		Category: models.Category(stringArgument(args, "category", fieldErrors)),
+		Merchant: stringArgument(args, "merchant", fieldErrors),
+	}
 	for key := range args {
-		if key != "date_from" && key != "date_to" {
+		switch key {
+		case "date_from", "date_to", "category", "merchant":
+		default:
 			fieldErrors[key] = "unknown field"
 		}
 	}
@@ -121,7 +129,7 @@ func (s *Server) mcpListExpenses(ctx context.Context, req *mcp.CallToolRequest) 
 		return handlerToolError(ctx, pkg.NewValidationError(fieldErrors)), nil
 	}
 
-	expenses, err := s.handler.ListExpenses(ctx, from, to)
+	expenses, err := s.handler.ListExpenses(ctx, filter)
 	if err != nil {
 		return handlerToolError(ctx, err), nil
 	}
@@ -208,6 +216,19 @@ func dateArgument(args map[string]any, key string, fieldErrors map[string]string
 		return time.Time{}
 	}
 	return t
+}
+
+// stringArgument reads an optional string argument; missing or null is "".
+func stringArgument(args map[string]any, key string, fieldErrors map[string]string) string {
+	v, ok := args[key]
+	if !ok || v == nil {
+		return ""
+	}
+	s, isString := v.(string)
+	if !isString {
+		fieldErrors[key] = "must be a string"
+	}
+	return s
 }
 
 // toolResult returns v as structured content and as JSON text for clients

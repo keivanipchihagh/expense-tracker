@@ -32,6 +32,7 @@ The database is stored in `data/expense.db`. Stop the container before opening o
 Open `PUBLIC_URL` (by default http://localhost:8000) and sign in with `AUTH_PASSWORD`.
 
 - List expenses for a date range, with presets for this month, last month, this year and all time
+- Filter by category and merchant; the totals follow the filters
 - Totals per currency, with a breakdown by category
 - Add, edit and delete expenses; time and time zone default to your browser's
 - **Apps** page: see which apps (Claude, ChatGPT, …) are signed in through OAuth and revoke their access
@@ -46,7 +47,7 @@ An MCP server runs at `/mcp` (Streamable HTTP), so AI agents can log, correct an
 | Tool | Does |
 |---|---|
 | `create_expense` | Record an expense |
-| `list_expenses` | List expenses for a date range (`date_from`, `date_to`, both optional) |
+| `list_expenses` | List expenses, optionally filtered by `date_from`, `date_to`, `category` and `merchant` |
 | `get_expense` | Get one expense by id |
 | `update_expense` | Change the fields sent; `null` clears `merchant` or `note` |
 | `delete_expense` | Delete an expense permanently |
@@ -124,7 +125,7 @@ sqlite3 data/expense.db "SELECT action, before, after FROM logs WHERE expense_id
 |---|---|---|
 | GET | `/health` | Service status and version |
 | POST | `/api/v1/expenses` | Create an expense |
-| GET | `/api/v1/expenses?date_from=&date_to=` | List expenses by local date (`YYYY-MM-DD`, inclusive), oldest first |
+| GET | `/api/v1/expenses?date_from=&date_to=&category=&merchant=` | List expenses, oldest first. All parameters are optional: dates are local (`YYYY-MM-DD`, inclusive), `category` matches exactly, `merchant` matches part of the name ignoring case |
 | GET | `/api/v1/expenses/{id}` | Get an expense |
 | PATCH | `/api/v1/expenses/{id}` | Update the fields sent; `null` clears an optional field |
 | DELETE | `/api/v1/expenses/{id}` | Delete an expense permanently |
