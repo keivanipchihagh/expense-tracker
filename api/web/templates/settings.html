@@ -54,4 +54,28 @@
     <div class="form-actions"><button type="submit" class="primary">Change password</button></div>
   </form>
 </section>
+
+<section class="card">
+  <header class="card-head"><h2>Your data</h2><p class="muted small-text">Download everything stored about you as JSON, or delete your account for good.</p></header>
+  <div class="data-actions">
+    <a href="/settings/export" class="button outline" download>Export my data</a>
+    <button type="button" class="danger-outline" data-dialog-open="delete-account">Delete account</button>
+  </div>
+</section>
+
+<dialog id="delete-account" class="confirm-dialog" aria-labelledby="delete-account-title" {{if index $errors "delete_password"}}data-show-on-load{{end}}>
+  <form method="post" action="/settings/delete" class="account-form">
+    <h2 id="delete-account-title">Delete your account?</h2>
+    <p class="muted">Your expenses, their history and your app connections are deleted permanently. This can't be undone. You may want to export your data first.</p>
+    <label class="{{if index $errors "delete_password"}}invalid{{end}}">
+      <span>Password</span>
+      <input type="password" name="password" autocomplete="current-password" required>
+      {{with index $errors "delete_password"}}<small class="field-error">Password {{.}}</small>{{end}}
+    </label>
+    <div class="form-actions">
+      <button type="button" data-dialog-close>Cancel</button>
+      <button type="submit" class="danger">Delete account</button>
+    </div>
+  </form>
+</dialog>
 {{end}}

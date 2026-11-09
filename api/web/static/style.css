@@ -444,6 +444,31 @@ input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible
 .account-form .readonly { background: var(--subtle); color: var(--muted); cursor: default; }
 .account-form .readonly:focus { border-color: var(--border); box-shadow: none; }
 
+/* Your data: export and delete side by side. */
+.data-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.data-actions > * { flex: 1 1 160px; max-width: 205px; }
+a.button.outline { height: 38px; padding: 0 14px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-weight: 400; }
+a.button.outline:hover { background: var(--subtle); }
+button.danger { background: var(--danger); border-color: var(--danger); color: #fff; font-weight: 550; }
+button.danger:hover { opacity: .88; }
+
+/* Confirmation dialog (native <dialog>, opened by app.js). */
+.confirm-dialog {
+  width: min(420px, calc(100% - 32px));
+  /* The padding is on the form, so a click on the dialog itself is the backdrop. */
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+.confirm-dialog > form { padding: 20px; }
+.confirm-dialog::backdrop { background: var(--backdrop); backdrop-filter: blur(2px); }
+.confirm-dialog h2 { margin: 0; font-size: 1.15rem; }
+.confirm-dialog p { margin: 0; font-size: .9rem; }
+.confirm-dialog .form-actions { justify-content: flex-end; gap: 8px; }
+
 /* Profile menu: initials in a circle; the menu holds the account links. */
 .profile-menu { position: relative; margin-left: 4px; }
 .avatar-button { list-style: none; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 999px; background: var(--subtle); border: 1px solid var(--border); color: var(--text); font-size: .75rem; font-weight: 650; letter-spacing: .02em; cursor: pointer; user-select: none; }

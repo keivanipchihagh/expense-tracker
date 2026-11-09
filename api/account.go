@@ -1,9 +1,12 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/keivanipchihagh/expense-tracker/internal/handler"
 	"github.com/keivanipchihagh/expense-tracker/pkg"
@@ -150,6 +153,48 @@ func (s *Server) PasswordSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.renderAccount(w, r, http.StatusOK, pageData{Notice: "Password changed. Other browsers were signed out."})
+}
+
+// ExportDataDownload handles GET /settings/export: a JSON download of
+// everything stored about the account.
+func (s *Server) ExportDataDownload(w http.ResponseWriter, r *http.Request) {
+	data, err := s.handler.ExportData(r.Context())
+	if err != nil {
+		s.renderUiError(w, r, err)
+		return
+	}
+	name := "expense-tracker-data-" + data.ExportedAt.Format(time.DateOnly) + ".json"
+	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(data); err != nil {
+		slog.ErrorContext(r.Context(), "export data failed", "error", err)
+	}
+}
+
+// DeleteAccountSubmit handles POST /settings/delete: check the password,
+// delete the account and everything in it, and sign out.
+func (s *Server) DeleteAccountSubmit(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad form", http.StatusBadRequest)
+		return
+	}
+	err := s.handler.DeleteAccount(r.Context(), r.PostForm.Get("password"))
+	if appErr, ok := errors.AsType[*pkg.Error](err); ok && len(appErr.Fields) > 0 {
+		// Reopen the dialog with the error.
+		s.renderAccount(w, r, http.StatusUnprocessableEntity, pageData{Errors: map[string]string{"delete_password": appErr.Fields["password"]}})
+		return
+	}
+	if err != nil {
+		s.renderUiError(w, r, err)
+		return
+	}
+	expired := s.sessionCookie("", time.Unix(0, 0))
+	expired.MaxAge = -1
+	http.SetCookie(w, expired)
+	http.Redirect(w, r, "/login?deleted=1", http.StatusSeeOther)
 }
 
 func (s *Server) renderAccount(w http.ResponseWriter, r *http.Request, status int, data pageData) {

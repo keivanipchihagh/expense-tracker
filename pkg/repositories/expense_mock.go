@@ -84,6 +84,21 @@ func (mr *MockExpenseRepositoryMockRecorder) Get(ctx, userId, id any) *gomock.Ca
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Get", reflect.TypeOf((*MockExpenseRepository)(nil).Get), ctx, userId, id)
 }
 
+// History mocks base method.
+func (m *MockExpenseRepository) History(ctx context.Context, userId string) ([]models.Log, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "History", ctx, userId)
+	ret0, _ := ret[0].([]models.Log)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// History indicates an expected call of History.
+func (mr *MockExpenseRepositoryMockRecorder) History(ctx, userId any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "History", reflect.TypeOf((*MockExpenseRepository)(nil).History), ctx, userId)
+}
+
 // List mocks base method.
 func (m *MockExpenseRepository) List(ctx context.Context, userId string, filter models.ExpenseFilter) ([]models.Expense, error) {
 	m.ctrl.T.Helper()

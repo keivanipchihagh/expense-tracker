@@ -80,6 +80,43 @@ func (s *Server) ChangeMyPassword(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// ExportMe handles GET /api/v1/me/export: everything stored about the
+// account, as JSON.
+func (s *Server) ExportMe(w http.ResponseWriter, r *http.Request) {
+	data, err := s.handler.ExportData(r.Context())
+	if err != nil {
+		writeHandlerError(w, r, err)
+		return
+	}
+	writeJson(w, http.StatusOK, data)
+}
+
+// DeleteMe handles DELETE /api/v1/me with {"password"}: permanently delete
+// the account and everything in it.
+func (s *Server) DeleteMe(w http.ResponseWriter, r *http.Request) {
+	input, err := decodeJsonObject(r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	fieldErrors := map[string]string{}
+	password := stringField(input, "password", fieldErrors)
+	for key := range input {
+		if key != "password" {
+			fieldErrors[key] = "unknown field"
+		}
+	}
+	if len(fieldErrors) > 0 {
+		writeError(w, http.StatusUnprocessableEntity, codeValidationFailed, "validation failed", fieldErrors)
+		return
+	}
+	if err := s.handler.DeleteAccount(r.Context(), password); err != nil {
+		writeHandlerError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // signUpInput reads {"email", "password", "first_name", "last_name"}, all
 // required strings.
 func signUpInput(input map[string]any) (handler.SignUpInput, map[string]string) {

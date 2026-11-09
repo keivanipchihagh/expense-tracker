@@ -4,6 +4,7 @@ package repositories
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -15,6 +16,9 @@ import (
 type LogRepository interface {
 	// Create inserts log through exec, so it can join the caller's transaction.
 	Create(ctx context.Context, exec sqlite.Executor, log models.Log) error
+	// List returns the user's logs, oldest first, including those of
+	// expenses since deleted.
+	List(ctx context.Context, exec sqlite.Executor, userId string) ([]models.Log, error)
 }
 
 type LogRepositoryImpl struct{}
@@ -64,6 +68,43 @@ func (r *LogRepositoryImpl) Create(ctx context.Context, exec sqlite.Executor, lo
 		return fmt.Errorf("insert log: %w", err)
 	}
 	return nil
+}
+
+func (r *LogRepositoryImpl) List(ctx context.Context, exec sqlite.Executor, userId string) ([]models.Log, error) {
+	rows, err := exec.QueryContext(ctx, `
+		SELECT id, expense_id, user_id, action, "before", "after", CAST(created_at AS TEXT)
+		FROM logs WHERE user_id = ? ORDER BY id`, userId)
+	if err != nil {
+		return nil, fmt.Errorf("list logs: %w", err)
+	}
+	defer rows.Close()
+	logs := []models.Log{}
+	for rows.Next() {
+		var (
+			l             models.Log
+			action        string
+			before, after sql.NullString
+			createdAt     string
+		)
+		if err := rows.Scan(&l.Id, &l.ExpenseId, &l.UserId, &action, &before, &after, &createdAt); err != nil {
+			return nil, fmt.Errorf("scan log: %w", err)
+		}
+		l.Action = models.ParseLogAction(action)
+		if before.Valid {
+			l.Before = json.RawMessage(before.String)
+		}
+		if after.Valid {
+			l.After = json.RawMessage(after.String)
+		}
+		if l.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt); err != nil {
+			return nil, fmt.Errorf("parse log created_at: %w", err)
+		}
+		logs = append(logs, l)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list logs: %w", err)
+	}
+	return logs, nil
 }
 
 // nullableJson stores a missing snapshot as NULL and a present one as text.

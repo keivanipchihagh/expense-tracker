@@ -79,6 +79,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/me", s.GetMe)
 	mux.HandleFunc("PATCH /api/v1/me", s.UpdateMe)
 	mux.HandleFunc("PUT /api/v1/me/password", s.ChangeMyPassword)
+	mux.HandleFunc("GET /api/v1/me/export", s.ExportMe)
+	mux.HandleFunc("DELETE /api/v1/me", s.DeleteMe)
 
 	// MCP (Streamable HTTP)
 	mux.Handle("/mcp", s.NewMcpHandler())
@@ -100,6 +102,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /settings", s.requireSession(s.SettingsPage))
 	mux.HandleFunc("POST /settings", s.requireSession(s.SettingsSubmit))
 	mux.HandleFunc("POST /settings/password", s.requireSession(s.PasswordSubmit))
+	mux.HandleFunc("GET /settings/export", s.requireSession(s.ExportDataDownload))
+	mux.HandleFunc("POST /settings/delete", s.requireSession(s.DeleteAccountSubmit))
 	mux.HandleFunc("GET /account", s.AccountRedirect)
 	mux.HandleFunc("GET /ui/export", s.requireSession(s.ExportExpenses))
 	mux.HandleFunc("GET /analysis", s.requireSession(s.AnalysisPage))

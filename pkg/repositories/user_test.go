@@ -117,3 +117,85 @@ func TestSessionRepository_DeleteOthers(t *testing.T) {
 	_, err = repo.Get(ctx, "someone-else")
 	assert.NoError(t, err, "other users are untouched")
 }
+
+func TestUserRepository_Delete(t *testing.T) {
+	ctx := context.Background()
+	client := newTestClient(t)
+	users, err := NewUserRepository(ctx, client)
+	require.NoError(t, err)
+	logs, err := NewLogRepository(ctx, client)
+	require.NoError(t, err)
+	expenses, err := NewExpenseRepository(ctx, client, logs)
+	require.NoError(t, err)
+	sessions, err := NewSessionRepository(ctx, client)
+	require.NoError(t, err)
+	oauth, err := NewOAuthRepository(ctx, client)
+	require.NoError(t, err)
+
+	now := time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC)
+	for _, u := range []models.User{newUser("u1", "alice@example.com"), newUser("u2", "bob@example.com")} {
+		require.NoError(t, users.Create(ctx, u))
+		e := newExpense("e-"+u.Id, "2026-11-07T13:20:00+01:00")
+		e.UserId = u.Id
+		require.NoError(t, expenses.Create(ctx, e))
+		require.NoError(t, sessions.Create(ctx, models.Session{TokenHash: "s-" + u.Id, UserId: u.Id, ExpiresAt: now.Add(time.Hour), CreatedAt: now}))
+	}
+	for _, c := range []string{"shared", "bobs-own", "nobodys-yet"} {
+		require.NoError(t, oauth.CreateClient(ctx, models.OAuthClient{Id: c, Name: c, RedirectUris: []string{"http://localhost/cb"}, AuthMethod: "none", CreatedAt: now}))
+	}
+	token := func(hash, client, user string) models.OAuthToken {
+		return models.OAuthToken{TokenHash: hash, Kind: models.OAuthTokenAccess, ClientId: client, UserId: user, ExpiresAt: now.Add(time.Hour), CreatedAt: now}
+	}
+	require.NoError(t, oauth.CreateTokens(ctx, token("t1", "shared", "u1"), token("t2", "shared", "u2")))
+	require.NoError(t, oauth.CreateCode(ctx, models.OAuthCode{CodeHash: "c2", ClientId: "bobs-own", UserId: "u2", RedirectUri: "http://localhost/cb", ExpiresAt: now.Add(time.Minute)}))
+
+	require.NoError(t, users.Delete(ctx, "u2"))
+
+	rows := func(query string, args ...any) int {
+		var n int
+		require.NoError(t, client.QueryRow(query, args...).Scan(&n))
+		return n
+	}
+	// Alice's rows stay (she has no OAuth code).
+	for table, alices := range map[string]int{"expenses": 1, "logs": 1, "sessions": 1, "oauth_codes": 0, "oauth_tokens": 1} {
+		assert.Zero(t, rows("SELECT COUNT(*) FROM "+table+" WHERE user_id = 'u2'"), "bob's %s are gone", table)
+		assert.Equal(t, alices, rows("SELECT COUNT(*) FROM "+table+" WHERE user_id = 'u1'"), "alice's %s stay", table)
+	}
+	_, err = users.Get(ctx, "u2")
+	assert.ErrorIs(t, err, ErrUserNotFound)
+	_, err = users.Get(ctx, "u1")
+	assert.NoError(t, err)
+	assert.Equal(t, 1, rows("SELECT COUNT(*) FROM oauth_clients WHERE id = 'shared'"), "still used by alice")
+	assert.Zero(t, rows("SELECT COUNT(*) FROM oauth_clients WHERE id = 'bobs-own'"), "only bob used it")
+	assert.Equal(t, 1, rows("SELECT COUNT(*) FROM oauth_clients WHERE id = 'nobodys-yet'"), "clients bob never used are left alone")
+
+	assert.ErrorIs(t, users.Delete(ctx, "u2"), ErrUserNotFound)
+}
+
+func TestExpenseRepository_History(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := newTestExpenseRepo(t)
+	e := newExpense("e1", "2026-11-07T13:20:00+01:00")
+	require.NoError(t, repo.Create(ctx, e))
+	e.Amount = "13.00"
+	require.NoError(t, repo.Update(ctx, e))
+	require.NoError(t, repo.Delete(ctx, testUser, "e1"))
+	other := newExpense("e2", "2026-11-07T13:20:00+01:00")
+	other.UserId = "someone-else"
+	require.NoError(t, repo.Create(ctx, other))
+
+	logs, err := repo.History(ctx, testUser)
+	require.NoError(t, err)
+	require.Len(t, logs, 3, "the deleted expense's history is kept; others' isn't included")
+	assert.Equal(t, []models.LogAction{models.LogActionCreate, models.LogActionUpdate, models.LogActionDelete}, []models.LogAction{logs[0].Action, logs[1].Action, logs[2].Action})
+	assert.Nil(t, logs[0].Before)
+	assert.JSONEq(t, string(logs[1].After), string(logs[2].Before))
+	assert.Contains(t, string(logs[1].After), `"13.00"`)
+	assert.Nil(t, logs[2].After)
+	assert.Equal(t, "e1", logs[0].ExpenseId)
+
+	empty, err := repo.History(ctx, "nobody")
+	require.NoError(t, err)
+	assert.Empty(t, empty)
+	assert.NotNil(t, empty, "an empty list, not null, in exports")
+}

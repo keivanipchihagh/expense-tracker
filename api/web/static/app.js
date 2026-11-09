@@ -90,6 +90,22 @@
     if (menu && event.target.closest(".menu a")) menu.removeAttribute("open");
   });
 
+  // Confirmation dialogs: [data-dialog-open="id"] opens one, [data-dialog-close]
+  // or a click on the backdrop closes it. A dialog rendered with an error
+  // (data-show-on-load) opens straight away.
+  document.addEventListener("click", function (event) {
+    var opener = event.target.closest("[data-dialog-open]");
+    if (opener) {
+      var dialog = document.getElementById(opener.dataset.dialogOpen);
+      if (dialog) dialog.showModal();
+    }
+    if (event.target.closest("[data-dialog-close]")) event.target.closest("dialog").close();
+    if (event.target.tagName === "DIALOG") event.target.close();
+  });
+  document.querySelectorAll("dialog[data-show-on-load]").forEach(function (dialog) {
+    dialog.showModal();
+  });
+
   document.addEventListener("keydown", function (event) {
     if (event.key === "Escape") {
       closeEditor();

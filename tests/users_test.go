@@ -542,3 +542,163 @@ func TestUI_ExpenseFormAsBrowserSendsIt(t *testing.T) {
 		assert.Equal(t, "Bakery", e["merchant"])
 	}
 }
+
+// --- Export and delete ---------------------------------------------------
+
+// count returns the number of rows in table matching where.
+func count(t *testing.T, s *testServer, table, where string, args ...any) int {
+	t.Helper()
+	var n int
+	require.NoError(t, s.db.QueryRow("SELECT COUNT(*) FROM "+table+" WHERE "+where, args...).Scan(&n))
+	return n
+}
+
+func TestExportData_Api(t *testing.T) {
+	alice, bob, aliceExpense, bobExpense := twoUsers(t)
+	require.Equal(t, http.StatusOK, alice.call(t, http.MethodPatch, "/api/v1/expenses/"+aliceExpense, `{"note":"edited"}`, nil))
+
+	var data struct {
+		ExportedAt string           `json:"exported_at"`
+		Account    map[string]any   `json:"account"`
+		Expenses   []map[string]any `json:"expenses"`
+		History    []map[string]any `json:"history"`
+		Apps       []map[string]any `json:"connected_apps"`
+	}
+	require.Equal(t, http.StatusOK, alice.call(t, http.MethodGet, "/api/v1/me/export", "", &data))
+	assert.NotEmpty(t, data.ExportedAt)
+	assert.Equal(t, email, data.Account["email"])
+	assert.NotContains(t, data.Account, "password_hash")
+	require.Len(t, data.Expenses, 1, "only alice's expenses")
+	assert.Equal(t, aliceExpense, data.Expenses[0]["id"])
+	require.Len(t, data.History, 2)
+	assert.Equal(t, "create", data.History[0]["action"])
+	assert.Equal(t, "update", data.History[1]["action"])
+	assert.Nil(t, data.History[0]["before"])
+	require.Len(t, data.Apps, 1)
+	assert.Equal(t, "Test Client", data.Apps[0]["name"])
+
+	raw := map[string]any{}
+	require.Equal(t, http.StatusOK, bob.call(t, http.MethodGet, "/api/v1/me/export", "", &raw))
+	body, _ := json.Marshal(raw)
+	assert.Contains(t, string(body), bobExpense)
+	assert.NotContains(t, string(body), aliceExpense, "bob's export has nothing of alice's")
+	assert.NotContains(t, string(body), "$2a$", "no password hash")
+	assert.NotContains(t, string(body), alice.token)
+}
+
+func TestDeleteAccount_Api(t *testing.T) {
+	alice, bob, aliceExpense, bobExpense := twoUsers(t)
+	var bobId string
+	require.NoError(t, alice.db.QueryRow("SELECT id FROM users WHERE email = ?", bobEmail).Scan(&bobId))
+
+	var fail struct {
+		Error struct{ Fields map[string]string } `json:"error"`
+	}
+	assert.Equal(t, http.StatusUnprocessableEntity, bob.call(t, http.MethodDelete, "/api/v1/me", `{"password":"not-bobs-password"}`, &fail))
+	assert.Equal(t, map[string]string{"password": "is wrong"}, fail.Error.Fields)
+	fail.Error.Fields = nil
+	assert.Equal(t, http.StatusUnprocessableEntity, bob.call(t, http.MethodDelete, "/api/v1/me", `{}`, &fail))
+	assert.Equal(t, map[string]string{"password": "is required"}, fail.Error.Fields)
+	assert.Equal(t, 1, count(t, alice, "users", "id = ?", bobId), "nothing deleted yet")
+
+	assert.Equal(t, http.StatusNoContent, bob.call(t, http.MethodDelete, "/api/v1/me", `{"password":"`+bobPassword+`"}`, nil))
+
+	for _, table := range []string{"users"} {
+		assert.Zero(t, count(t, alice, table, "id = ?", bobId))
+	}
+	for _, table := range []string{"expenses", "logs", "sessions", "oauth_codes", "oauth_tokens"} {
+		assert.Zero(t, count(t, alice, table, "user_id = ?", bobId), "bob's %s are gone", table)
+	}
+	assert.Equal(t, http.StatusUnauthorized, bob.call(t, http.MethodGet, "/api/v1/me", "", nil), "bob's token stops working")
+	assert.Equal(t, http.StatusUnauthorized, bob.call(t, http.MethodGet, "/api/v1/expenses/"+bobExpense, "", nil))
+
+	// Alice is untouched, and bob's email is free again.
+	var got map[string]any
+	require.Equal(t, http.StatusOK, alice.call(t, http.MethodGet, "/api/v1/expenses/"+aliceExpense, "", &got))
+	assert.Equal(t, 1, count(t, alice, "logs", "user_id IS NOT NULL"))
+	resp, err := http.Post(alice.url+"/api/v1/users", "application/json", strings.NewReader(`{"email":"bob@example.com","password":"bob-has-a-long-password","first_name":"Bob","last_name":"B"}`))
+	require.NoError(t, err)
+	decode(t, resp, nil)
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+}
+
+func TestDeleteAccount_KeepsSharedApps(t *testing.T) {
+	s := newTestServer(t)
+	clientId := s.register(t)
+	status, tok, _ := s.tokenRequest(t, codeGrant(clientId, s.authorize(t, clientId)))
+	require.Equal(t, http.StatusOK, status)
+	s.token = tok.AccessToken
+
+	// Bob signs in to the same client, and to one only he uses.
+	s.addUser(t, bobEmail, bobPassword)
+	bob := &testServer{url: s.url, db: s.db, h: s.h, email: bobEmail, password: bobPassword}
+	status, tok, _ = bob.tokenRequest(t, codeGrant(clientId, bob.authorize(t, clientId)))
+	require.Equal(t, http.StatusOK, status)
+	bob.token = tok.AccessToken
+	bobsOwn := bob.register(t)
+	bob.authorize(t, bobsOwn) // leaves an unused code
+
+	require.Equal(t, http.StatusNoContent, bob.call(t, http.MethodDelete, "/api/v1/me", `{"password":"`+bobPassword+`"}`, nil))
+	assert.Equal(t, 1, count(t, s, "oauth_clients", "id = ?", clientId), "alice still uses the shared client")
+	assert.Zero(t, count(t, s, "oauth_clients", "id = ?", bobsOwn), "the client only bob used is gone")
+	assert.Equal(t, http.StatusOK, s.call(t, http.MethodGet, "/api/v1/me", "", nil), "alice's token still works")
+}
+
+func TestDataSettings_UI(t *testing.T) {
+	s := newTestServer(t)
+	c := browser(t)
+	signIn(t, s, c)
+	_, _, _ = send(t, c, http.MethodPost, s.url+"/ui/expenses", url.Values{
+		"amount": {"12.50"}, "category": {"food"}, "merchant": {"Rewe"}, "occurred_local": {"2026-11-07T13:20"}, "tz_offset": {"60"},
+	}, map[string]string{"HX-Request": "true"})
+
+	_, _, page := send(t, c, http.MethodGet, s.url+"/settings", nil, nil)
+	assert.Contains(t, page, `<a href="/settings/export" class="button outline" download>Export my data</a>`)
+	assert.Contains(t, page, `data-dialog-open="delete-account">Delete account</button>`)
+	assert.NotContains(t, page, "data-show-on-load", "the dialog starts closed")
+
+	// Export downloads everything as JSON.
+	req, err := http.NewRequest(http.MethodGet, s.url+"/settings/export", nil)
+	require.NoError(t, err)
+	resp, err := c.Do(req)
+	require.NoError(t, err)
+	var data map[string]any
+	decode(t, resp, &data)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Regexp(t, `^attachment; filename="expense-tracker-data-\d{4}-\d{2}-\d{2}\.json"$`, resp.Header.Get("Content-Disposition"))
+	assert.Equal(t, "no-store", resp.Header.Get("Cache-Control"))
+	require.Len(t, data["expenses"], 1)
+	assert.Equal(t, "Rewe", data["expenses"].([]any)[0].(map[string]any)["merchant"])
+
+	// Signed out, neither works.
+	status, _, _ := send(t, browser(t), http.MethodGet, s.url+"/settings/export", nil, nil)
+	assert.Equal(t, http.StatusSeeOther, status)
+	status, _, _ = send(t, browser(t), http.MethodPost, s.url+"/settings/delete", url.Values{"password": {password}}, nil)
+	assert.Equal(t, http.StatusSeeOther, status)
+
+	// Another site can't delete the account.
+	status, _, _ = send(t, c, http.MethodPost, s.url+"/settings/delete", url.Values{"password": {password}}, map[string]string{"Sec-Fetch-Site": "cross-site"})
+	assert.Equal(t, http.StatusForbidden, status)
+
+	// A wrong password reopens the dialog with the error.
+	status, _, page = send(t, c, http.MethodPost, s.url+"/settings/delete", url.Values{"password": {"not-my-password"}}, nil)
+	assert.Equal(t, http.StatusUnprocessableEntity, status)
+	assert.Contains(t, page, "data-show-on-load")
+	assert.Contains(t, page, "Password is wrong")
+	assert.True(t, hasSession(t, s, c), "still signed in")
+
+	other := browser(t)
+	signIn(t, s, other)
+	status, header, _ := send(t, c, http.MethodPost, s.url+"/settings/delete", url.Values{"password": {password}}, nil)
+	require.Equal(t, http.StatusSeeOther, status)
+	assert.Equal(t, "/login?deleted=1", header.Get("Location"))
+	assert.Contains(t, header.Get("Set-Cookie"), "Max-Age=0")
+	assert.False(t, hasSession(t, s, c))
+	assert.False(t, hasSession(t, s, other), "every browser is signed out")
+	_, _, login := send(t, c, http.MethodGet, s.url+"/login?deleted=1", nil, nil)
+	assert.Contains(t, login, "Your account and all its data were deleted.")
+	assert.Zero(t, count(t, s, "users", "1 = 1"))
+	assert.Zero(t, count(t, s, "expenses", "1 = 1"))
+	status, _, _ = send(t, browser(t), http.MethodPost, s.url+"/login", url.Values{"email": {email}, "password": {password}}, nil)
+	assert.Equal(t, http.StatusUnauthorized, status, "the account can't sign in any more")
+}

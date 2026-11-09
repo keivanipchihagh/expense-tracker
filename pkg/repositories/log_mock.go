@@ -55,3 +55,18 @@ func (mr *MockLogRepositoryMockRecorder) Create(ctx, exec, log any) *gomock.Call
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Create", reflect.TypeOf((*MockLogRepository)(nil).Create), ctx, exec, log)
 }
+
+// List mocks base method.
+func (m *MockLogRepository) List(ctx context.Context, exec sqlite.Executor, userId string) ([]models.Log, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "List", ctx, exec, userId)
+	ret0, _ := ret[0].([]models.Log)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// List indicates an expected call of List.
+func (mr *MockLogRepositoryMockRecorder) List(ctx, exec, userId any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "List", reflect.TypeOf((*MockLogRepository)(nil).List), ctx, exec, userId)
+}

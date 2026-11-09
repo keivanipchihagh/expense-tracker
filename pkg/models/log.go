@@ -29,6 +29,21 @@ func (a LogAction) String() string {
 	}
 }
 
+// ParseLogAction is the inverse of String; unknown text is
+// LogActionUnspecified.
+func ParseLogAction(s string) LogAction {
+	switch s {
+	case "create":
+		return LogActionCreate
+	case "update":
+		return LogActionUpdate
+	case "delete":
+		return LogActionDelete
+	default:
+		return LogActionUnspecified
+	}
+}
+
 // Log records one change to an expense as JSON snapshots of the row.
 // Before is nil for a create and After is nil for a delete.
 type Log struct {

@@ -32,6 +32,10 @@ type UserRepository interface {
 	// Update overwrites every column except id and created_at. Returns
 	// ErrUserNotFound or ErrEmailTaken.
 	Update(ctx context.Context, user models.User) error
+	// Delete removes the user and everything that is theirs, in one
+	// transaction: expenses, change logs, sessions, OAuth codes and tokens,
+	// and the OAuth clients only they were using. Returns ErrUserNotFound.
+	Delete(ctx context.Context, id string) error
 }
 
 type UserRepositoryImpl struct {
@@ -144,6 +148,54 @@ func (r *UserRepositoryImpl) Update(ctx context.Context, u models.User) error {
 		return ErrUserNotFound
 	}
 	return nil
+}
+
+func (r *UserRepositoryImpl) Delete(ctx context.Context, id string) error {
+	return r.client.WithTx(ctx, func(tx *sql.Tx) error {
+		// Clients the user was using; removed below if no one else is.
+		rows, err := tx.QueryContext(ctx,
+			`SELECT client_id FROM oauth_codes WHERE user_id = ? UNION SELECT client_id FROM oauth_tokens WHERE user_id = ?`, id, id)
+		if err != nil {
+			return fmt.Errorf("find user's oauth clients: %w", err)
+		}
+		var clients []string
+		for rows.Next() {
+			var c string
+			if err := rows.Scan(&c); err != nil {
+				rows.Close()
+				return fmt.Errorf("scan oauth client: %w", err)
+			}
+			clients = append(clients, c)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("find user's oauth clients: %w", err)
+		}
+
+		for _, table := range []string{"expenses", "logs", "sessions", "oauth_codes", "oauth_tokens"} {
+			if _, err := tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE user_id = ?", id); err != nil {
+				return fmt.Errorf("delete user's %s: %w", table, err)
+			}
+		}
+		for _, c := range clients {
+			_, err := tx.ExecContext(ctx, `
+				DELETE FROM oauth_clients
+				WHERE id = ?
+				  AND id NOT IN (SELECT client_id FROM oauth_tokens)
+				  AND id NOT IN (SELECT client_id FROM oauth_codes)`, c)
+			if err != nil {
+				return fmt.Errorf("delete unused oauth client: %w", err)
+			}
+		}
+		res, err := tx.ExecContext(ctx, "DELETE FROM users WHERE id = ?", id)
+		if err != nil {
+			return fmt.Errorf("delete user: %w", err)
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return ErrUserNotFound
+		}
+		return nil
+	})
 }
 
 // userWriteError turns a UNIQUE violation on the email into ErrEmailTaken;

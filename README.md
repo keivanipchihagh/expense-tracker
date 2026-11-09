@@ -8,7 +8,7 @@ A self-hosted expense log you can talk to. Tell an AI agent "12.50 for lunch at 
 ## Features
 
 - **MCP server** for Claude, ChatGPT, Gemini and other agents: log, correct, look up and delete expenses
-- **Accounts**: sign up with email and password; each person sees only their own expenses
+- **Accounts**: sign up with email and password; each person sees only their own expenses, and can export all their data or delete their account
 - **Web UI**: list and filter expenses, quick add, CSV/JSON export, light and dark theme
 - **Analysis**: totals against the previous period, category breakdown, spending over time, top merchants
 - **Built-in OAuth 2.1** for agents, and a REST API
@@ -39,7 +39,7 @@ Agents that connect from the internet (claude.ai, ChatGPT, Gemini) need `PUBLIC_
 
 ## API
 
-`/api/v1/expenses` supports create, list (filter by `date_from`, `date_to`, `category`, `merchant`), get, update (`PATCH`, merge patch) and delete. `/api/v1/me` reads and updates your account (`PUT /api/v1/me/password` changes the password), and `POST /api/v1/users` signs up. Everything except sign-up needs an OAuth bearer token; agents get one automatically, and [MCP Inspector](https://github.com/modelcontextprotocol/inspector) can get one by hand.
+`/api/v1/expenses` supports create, list (filter by `date_from`, `date_to`, `category`, `merchant`), get, update (`PATCH`, merge patch) and delete. `/api/v1/me` reads, updates (`PATCH`) and deletes (`DELETE`, with your password) your account; `GET /api/v1/me/export` returns all your data and `PUT /api/v1/me/password` changes the password. `POST /api/v1/users` signs up. Everything except sign-up needs an OAuth bearer token; agents get one automatically, and [MCP Inspector](https://github.com/modelcontextprotocol/inspector) can get one by hand.
 
 ```bash
 curl -X POST localhost:8000/api/v1/expenses -H "Authorization: Bearer $TOKEN" \

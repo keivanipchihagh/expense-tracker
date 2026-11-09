@@ -81,7 +81,11 @@ func (s *Server) LoginPage(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
-	s.renderPage(w, http.StatusOK, "login.html", pageData{Title: "Sign in", SignupEnabled: s.handler.SignupEnabled()})
+	data := pageData{Title: "Sign in", SignupEnabled: s.handler.SignupEnabled()}
+	if r.URL.Query().Has("deleted") {
+		data.Notice = "Your account and all its data were deleted."
+	}
+	s.renderPage(w, http.StatusOK, "login.html", data)
 }
 
 // LoginSubmit handles POST /login.

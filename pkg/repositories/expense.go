@@ -37,6 +37,9 @@ type ExpenseRepository interface {
 	// Delete removes the user's expense and writes a delete log in one
 	// transaction. Returns ErrExpenseNotFound if missing or someone else's.
 	Delete(ctx context.Context, userId, id string) error
+	// History returns the user's change log, oldest first, including
+	// changes to expenses since deleted.
+	History(ctx context.Context, userId string) ([]models.Log, error)
 }
 
 type ExpenseRepositoryImpl struct {
@@ -303,4 +306,8 @@ func nullableString(s sql.NullString) *string {
 		return nil
 	}
 	return &s.String
+}
+
+func (r *ExpenseRepositoryImpl) History(ctx context.Context, userId string) ([]models.Log, error) {
+	return r.logRepo.List(ctx, r.client, userId)
 }
