@@ -440,6 +440,7 @@ func TestUI_Export(t *testing.T) {
 	assert.Contains(t, page, `href="/ui/export?category=groceries&amp;format=csv&amp;from=2026-11-01&amp;to=2026-11-30" download>CSV</a>`)
 	assert.Contains(t, page, `href="/ui/export?category=groceries&amp;format=json&amp;from=2026-11-01&amp;to=2026-11-30" download>JSON</a>`)
 	assert.Contains(t, page, `<details class="export-menu">`, "a dropdown in the filter row")
+	assert.Contains(t, page, `<summary aria-label="Download" title="Download what the list shows">`, "opened by a download icon")
 
 	_, _, empty := send(t, c, http.MethodGet, s.url+"/?from=2027-01-01&to=2027-01-31", nil, nil)
 	assert.NotContains(t, empty, "export-menu", "nothing to export, no menu")

@@ -36,7 +36,9 @@
   <input type="search" name="merchant" value="{{.Filter.Merchant}}" placeholder="Merchant" aria-label="Merchant" maxlength="200" autocomplete="off">
   {{if .Rows}}
   <details class="export-menu">
-    <summary title="Export what the list shows">Export</summary>
+    <summary aria-label="Download" title="Download what the list shows">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>
+    </summary>
     <div class="menu">
       <a href="/ui/export?{{.Filter.ExportQuery "csv"}}" download>CSV</a>
       <a href="/ui/export?{{.Filter.ExportQuery "json"}}" download>JSON</a>

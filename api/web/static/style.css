@@ -181,9 +181,9 @@ input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible
 .filter-bar select.set, .filter-bar input:not(:placeholder-shown) { border-color: var(--text); }
 /* Export: a small dropdown at the end of the filter row. */
 .export-menu { position: relative; flex: none; order: 1; }
-.export-menu summary { list-style: none; cursor: pointer; padding: 6px 12px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); font-size: .9rem; line-height: 22px; background: var(--surface); }
+.export-menu summary { list-style: none; cursor: pointer; display: grid; place-items: center; width: 36px; height: 36px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); background: var(--surface); }
 .export-menu summary::-webkit-details-marker { display: none; }
-.export-menu summary::after { content: " ▾"; font-size: .75rem; }
+.export-menu summary svg { width: 16px; height: 16px; }
 .export-menu summary:hover, .export-menu[open] summary { color: var(--text); }
 .export-menu .menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 4; display: grid; min-width: 120px; padding: 4px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); box-shadow: var(--shadow); }
 .export-menu .menu a { padding: 7px 10px; border-radius: 6px; color: var(--text); font-size: .9rem; text-decoration: none; }
