@@ -78,7 +78,7 @@
   <ul class="rows">
     {{range .Rows}}
     <li class="row">
-      <span class="avatar" aria-hidden="true">{{slice .Category 0 1}}</span>
+      {{if .HasReceipt}}<img class="avatar receipt" src="/ui/expenses/{{.Id}}/receipt" alt="" loading="lazy" title="Has a receipt">{{else}}<span class="avatar" aria-hidden="true">{{slice .Category 0 1}}</span>{{end}}
       <div class="row-main">
         <span class="row-title">{{if .Merchant}}{{.Merchant}}{{else}}<span class="cat">{{.Category}}</span>{{end}}</span>
         <span class="row-meta"{{if .Note}} title="{{.Note}}"{{end}}><span class="cat">{{.Category}}</span> · {{.Time}} <span class="offset">{{.Offset}}</span>{{if .Note}} · <span class="row-note">{{.Note}}</span>{{end}}</span>

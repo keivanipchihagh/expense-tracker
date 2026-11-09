@@ -24,6 +24,7 @@ var (
 	InternalError      = &Error{Status: http.StatusInternalServerError, Code: "internal", Message: "internal server error"}
 	ErrExpenseNotFound = &Error{Status: http.StatusNotFound, Code: "not_found", Message: "expense not found"}
 	ErrAppNotFound     = &Error{Status: http.StatusNotFound, Code: "not_found", Message: "app not found"}
+	ErrReceiptNotFound = &Error{Status: http.StatusNotFound, Code: "not_found", Message: "this expense has no receipt"}
 	// ErrNotSignedIn means a request reached a handler without a user; the
 	// auth middleware should have stopped it.
 	ErrNotSignedIn = &Error{Status: http.StatusUnauthorized, Code: "unauthorized", Message: "not signed in"}

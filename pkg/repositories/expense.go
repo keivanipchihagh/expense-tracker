@@ -21,6 +21,9 @@ var likeEscaper = strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`)
 // ErrExpenseNotFound is returned when no expense has the given id.
 var ErrExpenseNotFound = errors.New("expense not found")
 
+// ErrReceiptNotFound is returned when an expense has no receipt.
+var ErrReceiptNotFound = errors.New("receipt not found")
+
 type ExpenseRepository interface {
 	// Create inserts the expense and its create log in one transaction.
 	Create(ctx context.Context, expense models.Expense) error
@@ -40,6 +43,19 @@ type ExpenseRepository interface {
 	// History returns the user's change log, oldest first, including
 	// changes to expenses since deleted.
 	History(ctx context.Context, userId string) ([]models.Log, error)
+
+	// SaveReceipt keeps the photo with the user's expense, replacing any
+	// earlier one. Returns ErrExpenseNotFound if the expense isn't theirs.
+	SaveReceipt(ctx context.Context, receipt models.Receipt) error
+	// GetReceipt returns the receipt of the user's expense, or
+	// ErrReceiptNotFound.
+	GetReceipt(ctx context.Context, userId, expenseId string) (models.Receipt, error)
+	// DeleteReceipt removes the receipt of the user's expense, if any.
+	DeleteReceipt(ctx context.Context, userId, expenseId string) error
+	// ReceiptIds returns the ids of the user's expenses that have a receipt.
+	ReceiptIds(ctx context.Context, userId string) (map[string]bool, error)
+	// ListReceipts returns all the user's receipts, oldest first.
+	ListReceipts(ctx context.Context, userId string) ([]models.Receipt, error)
 }
 
 type ExpenseRepositoryImpl struct {
@@ -63,6 +79,18 @@ const expenseTableSchema = `
 
 const expenseIndexSchema = `CREATE INDEX IF NOT EXISTS expenses_occurred_at ON expenses (occurred_at)`
 
+// Receipts are kept in the database, so a backup is still one file. One
+// per expense; deleted with it.
+const receiptTableSchema = `
+	CREATE TABLE IF NOT EXISTS receipts (
+		expense_id TEXT     PRIMARY KEY,
+		user_id    TEXT     NOT NULL,
+		mime_type  TEXT     NOT NULL,
+		data       BLOB     NOT NULL,
+		created_at DATETIME NOT NULL
+	)
+`
+
 // expenseSelect reads every column. Timestamps are cast to TEXT so the driver
 // returns them exactly as stored instead of converting them to time.Time.
 const expenseSelect = `
@@ -77,7 +105,7 @@ func NewExpenseRepository(ctx context.Context, client *sqlite.Client, logRepo Lo
 	if client == nil || logRepo == nil {
 		panic("expense repository: client and log repository must not be nil")
 	}
-	for _, stmt := range []string{expenseTableSchema, expenseIndexSchema} {
+	for _, stmt := range []string{expenseTableSchema, expenseIndexSchema, receiptTableSchema} {
 		if _, err := client.ExecContext(ctx, stmt); err != nil {
 			return nil, fmt.Errorf("create expenses table: %w", err)
 		}
@@ -246,6 +274,9 @@ func (r *ExpenseRepositoryImpl) Delete(ctx context.Context, userId, id string) e
 		if _, err := tx.ExecContext(ctx, "DELETE FROM expenses WHERE id = ? AND user_id = ?", id, userId); err != nil {
 			return fmt.Errorf("delete expense: %w", err)
 		}
+		if _, err := tx.ExecContext(ctx, "DELETE FROM receipts WHERE expense_id = ? AND user_id = ?", id, userId); err != nil {
+			return fmt.Errorf("delete receipt: %w", err)
+		}
 		return r.logRepo.Create(ctx, tx, *models.NewLog(id, userId, models.LogActionDelete, before, nil))
 	})
 }
@@ -310,4 +341,83 @@ func nullableString(s sql.NullString) *string {
 
 func (r *ExpenseRepositoryImpl) History(ctx context.Context, userId string) ([]models.Log, error) {
 	return r.logRepo.List(ctx, r.client, userId)
+}
+
+func (r *ExpenseRepositoryImpl) SaveReceipt(ctx context.Context, rc models.Receipt) error {
+	// Only for an expense the user owns.
+	res, err := r.client.ExecContext(ctx, `
+		INSERT INTO receipts (expense_id, user_id, mime_type, data, created_at)
+		SELECT id, user_id, ?, ?, ? FROM expenses WHERE id = ? AND user_id = ?
+		ON CONFLICT (expense_id) DO UPDATE SET mime_type = excluded.mime_type, data = excluded.data, created_at = excluded.created_at`,
+		rc.MimeType, rc.Data, formatTime(rc.CreatedAt.UTC()), rc.ExpenseId, rc.UserId)
+	if err != nil {
+		return fmt.Errorf("save receipt: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrExpenseNotFound
+	}
+	return nil
+}
+
+func (r *ExpenseRepositoryImpl) GetReceipt(ctx context.Context, userId, expenseId string) (models.Receipt, error) {
+	rows, err := r.queryReceipts(ctx, "WHERE expense_id = ? AND user_id = ?", expenseId, userId)
+	if err != nil {
+		return models.Receipt{}, err
+	}
+	if len(rows) == 0 {
+		return models.Receipt{}, ErrReceiptNotFound
+	}
+	return rows[0], nil
+}
+
+func (r *ExpenseRepositoryImpl) DeleteReceipt(ctx context.Context, userId, expenseId string) error {
+	if _, err := r.client.ExecContext(ctx, "DELETE FROM receipts WHERE expense_id = ? AND user_id = ?", expenseId, userId); err != nil {
+		return fmt.Errorf("delete receipt: %w", err)
+	}
+	return nil
+}
+
+func (r *ExpenseRepositoryImpl) ReceiptIds(ctx context.Context, userId string) (map[string]bool, error) {
+	rows, err := r.client.QueryContext(ctx, "SELECT expense_id FROM receipts WHERE user_id = ?", userId)
+	if err != nil {
+		return nil, fmt.Errorf("list receipt ids: %w", err)
+	}
+	defer rows.Close()
+	ids := map[string]bool{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan receipt id: %w", err)
+		}
+		ids[id] = true
+	}
+	return ids, rows.Err()
+}
+
+func (r *ExpenseRepositoryImpl) ListReceipts(ctx context.Context, userId string) ([]models.Receipt, error) {
+	return r.queryReceipts(ctx, "WHERE user_id = ? ORDER BY created_at, expense_id", userId)
+}
+
+func (r *ExpenseRepositoryImpl) queryReceipts(ctx context.Context, where string, args ...any) ([]models.Receipt, error) {
+	rows, err := r.client.QueryContext(ctx,
+		"SELECT expense_id, user_id, mime_type, data, CAST(created_at AS TEXT) FROM receipts "+where, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query receipts: %w", err)
+	}
+	defer rows.Close()
+	out := []models.Receipt{}
+	for rows.Next() {
+		var (
+			rc        models.Receipt
+			createdAt string
+		)
+		if err := rows.Scan(&rc.ExpenseId, &rc.UserId, &rc.MimeType, &rc.Data, &createdAt); err != nil {
+			return nil, fmt.Errorf("scan receipt: %w", err)
+		}
+		if rc.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt); err != nil {
+			return nil, fmt.Errorf("parse receipt created_at: %w", err)
+		}
+		out = append(out, rc)
+	}
+	return out, rows.Err()
 }

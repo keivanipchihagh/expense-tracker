@@ -57,11 +57,13 @@
   function closeEditor() {
     var editor = document.getElementById("editor");
     if (editor) editor.innerHTML = "";
+    pendingReceipt = null;
   }
 
   document.addEventListener("htmx:load", function (event) {
     fillTimeFields(event.detail.elt);
     syncQuickDates(event.detail.elt);
+    attachPendingReceipt(event.detail.elt);
   });
 
   document.addEventListener("input", function (event) {
@@ -95,6 +97,21 @@
   // answers with the form filled in for the user to check. The photo stays
   // on screen next to it while they do.
   var SCAN_MAX_SIDE = 1600;
+
+  // The last scanned photo, kept so the form can send it along when the
+  // expense is added (and put back if the form comes back with errors).
+  var pendingReceipt = null;
+
+  function attachPendingReceipt(root) {
+    if (!pendingReceipt || !root.querySelector) return;
+    var zone = root.querySelector("[data-scan].scanned");
+    var field = root.querySelector("[data-receipt-field]");
+    if (!zone || !field) return;
+    var transfer = new DataTransfer();
+    transfer.items.add(new File([pendingReceipt.blob], "receipt.jpg", { type: pendingReceipt.blob.type || "image/jpeg" }));
+    field.files = transfer.files;
+    showPreview(pendingReceipt.url);
+  }
 
   function shrink(file) {
     return new Promise(function (resolve) {
@@ -156,6 +173,7 @@
 
     shrink(file)
       .then(function (image) {
+        pendingReceipt = { blob: image, url: previewUrl };
         var body = new FormData();
         ["from", "to", "filter_category", "filter_merchant", "tz_offset"].forEach(function (name) {
           var input = form.querySelector('[name="' + name + '"]');
@@ -170,8 +188,10 @@
           return;
         }
         return response.text().then(function (html) {
-          htmx.swap(document.getElementById("editor"), html, { swapStyle: "innerHTML" });
+          var editor = document.getElementById("editor");
+          htmx.swap(editor, html, { swapStyle: "innerHTML" });
           showPreview(previewUrl);
+          attachPendingReceipt(editor);
         });
       })
       .catch(function () {

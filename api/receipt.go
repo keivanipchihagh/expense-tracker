@@ -18,7 +18,12 @@ const scanPath = "/ui/expenses/scan"
 // a receipt scan uploads a photo and waits on a free model that can be
 // slow.
 func RouteLimits() []pkgHttp.RouteLimits {
-	return []pkgHttp.RouteLimits{{Path: scanPath, Timeout: 90 * time.Second, MaxBodyBytes: handler.MaxReceiptBytes + 64<<10}}
+	upload := int64(handler.MaxReceiptBytes + 64<<10)
+	return []pkgHttp.RouteLimits{
+		{Path: scanPath, Timeout: 90 * time.Second, MaxBodyBytes: upload},
+		// Adding an expense can carry the scanned receipt along.
+		{Path: "/ui/expenses", MaxBodyBytes: upload},
+	}
 }
 
 // ScanReceiptSubmit handles POST /ui/expenses/scan: a multipart form with
@@ -94,4 +99,49 @@ func (s *Server) ScanReceiptSubmit(w http.ResponseWriter, r *http.Request) {
 		data.Values.OccurredLocal = draft.Date + "T" + t + ":00"
 	}
 	render(http.StatusOK)
+}
+
+// ReceiptImage handles GET /ui/expenses/{id}/receipt: the photo kept with
+// the expense.
+func (s *Server) ReceiptImage(w http.ResponseWriter, r *http.Request) {
+	rc, err := s.handler.Receipt(r.Context(), r.PathValue("id"))
+	if err != nil {
+		if appErr, ok := errors.AsType[*pkg.Error](err); ok && appErr.Status == http.StatusNotFound {
+			http.NotFound(w, r)
+			return
+		}
+		s.renderUiError(w, r, err)
+		return
+	}
+	writeReceipt(w, rc)
+}
+
+// ExpenseReceipt handles GET /api/v1/expenses/{id}/receipt.
+func (s *Server) ExpenseReceipt(w http.ResponseWriter, r *http.Request) {
+	rc, err := s.handler.Receipt(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeHandlerError(w, r, err)
+		return
+	}
+	writeReceipt(w, rc)
+}
+
+// writeReceipt sends the image with the type sniffed when it was stored.
+// It's private to the user but never changes, so the browser may keep it.
+func writeReceipt(w http.ResponseWriter, rc models.Receipt) {
+	w.Header().Set("Content-Type", rc.MimeType)
+	w.Header().Set("Content-Disposition", `inline; filename="receipt`+receiptExt(rc.MimeType)+`"`)
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'")
+	w.Header().Set("Cache-Control", "private, max-age=86400")
+	_, _ = w.Write(rc.Data)
+}
+
+func receiptExt(mimeType string) string {
+	switch mimeType {
+	case "image/png":
+		return ".png"
+	case "image/webp":
+		return ".webp"
+	}
+	return ".jpg"
 }

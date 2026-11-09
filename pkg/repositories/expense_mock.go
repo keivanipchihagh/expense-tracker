@@ -69,6 +69,20 @@ func (mr *MockExpenseRepositoryMockRecorder) Delete(ctx, userId, id any) *gomock
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Delete", reflect.TypeOf((*MockExpenseRepository)(nil).Delete), ctx, userId, id)
 }
 
+// DeleteReceipt mocks base method.
+func (m *MockExpenseRepository) DeleteReceipt(ctx context.Context, userId, expenseId string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteReceipt", ctx, userId, expenseId)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteReceipt indicates an expected call of DeleteReceipt.
+func (mr *MockExpenseRepositoryMockRecorder) DeleteReceipt(ctx, userId, expenseId any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteReceipt", reflect.TypeOf((*MockExpenseRepository)(nil).DeleteReceipt), ctx, userId, expenseId)
+}
+
 // Get mocks base method.
 func (m *MockExpenseRepository) Get(ctx context.Context, userId, id string) (models.Expense, error) {
 	m.ctrl.T.Helper()
@@ -82,6 +96,21 @@ func (m *MockExpenseRepository) Get(ctx context.Context, userId, id string) (mod
 func (mr *MockExpenseRepositoryMockRecorder) Get(ctx, userId, id any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Get", reflect.TypeOf((*MockExpenseRepository)(nil).Get), ctx, userId, id)
+}
+
+// GetReceipt mocks base method.
+func (m *MockExpenseRepository) GetReceipt(ctx context.Context, userId, expenseId string) (models.Receipt, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetReceipt", ctx, userId, expenseId)
+	ret0, _ := ret[0].(models.Receipt)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetReceipt indicates an expected call of GetReceipt.
+func (mr *MockExpenseRepositoryMockRecorder) GetReceipt(ctx, userId, expenseId any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetReceipt", reflect.TypeOf((*MockExpenseRepository)(nil).GetReceipt), ctx, userId, expenseId)
 }
 
 // History mocks base method.
@@ -112,6 +141,50 @@ func (m *MockExpenseRepository) List(ctx context.Context, userId string, filter 
 func (mr *MockExpenseRepositoryMockRecorder) List(ctx, userId, filter any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "List", reflect.TypeOf((*MockExpenseRepository)(nil).List), ctx, userId, filter)
+}
+
+// ListReceipts mocks base method.
+func (m *MockExpenseRepository) ListReceipts(ctx context.Context, userId string) ([]models.Receipt, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListReceipts", ctx, userId)
+	ret0, _ := ret[0].([]models.Receipt)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListReceipts indicates an expected call of ListReceipts.
+func (mr *MockExpenseRepositoryMockRecorder) ListReceipts(ctx, userId any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListReceipts", reflect.TypeOf((*MockExpenseRepository)(nil).ListReceipts), ctx, userId)
+}
+
+// ReceiptIds mocks base method.
+func (m *MockExpenseRepository) ReceiptIds(ctx context.Context, userId string) (map[string]bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ReceiptIds", ctx, userId)
+	ret0, _ := ret[0].(map[string]bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ReceiptIds indicates an expected call of ReceiptIds.
+func (mr *MockExpenseRepositoryMockRecorder) ReceiptIds(ctx, userId any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReceiptIds", reflect.TypeOf((*MockExpenseRepository)(nil).ReceiptIds), ctx, userId)
+}
+
+// SaveReceipt mocks base method.
+func (m *MockExpenseRepository) SaveReceipt(ctx context.Context, receipt models.Receipt) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SaveReceipt", ctx, receipt)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// SaveReceipt indicates an expected call of SaveReceipt.
+func (mr *MockExpenseRepositoryMockRecorder) SaveReceipt(ctx, receipt any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SaveReceipt", reflect.TypeOf((*MockExpenseRepository)(nil).SaveReceipt), ctx, receipt)
 }
 
 // Update mocks base method.

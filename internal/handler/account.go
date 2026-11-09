@@ -13,11 +13,20 @@ import (
 // DataExport is everything stored about a user, for "export my data". The
 // password hash and the hashes of session and OAuth secrets are left out.
 type DataExport struct {
-	ExportedAt    time.Time        `json:"exported_at"`
-	Account       models.User      `json:"account"`
-	Expenses      []models.Expense `json:"expenses"`
-	History       []HistoryEntry   `json:"history"`
-	ConnectedApps []ExportedApp    `json:"connected_apps"`
+	ExportedAt    time.Time         `json:"exported_at"`
+	Account       models.User       `json:"account"`
+	Expenses      []models.Expense  `json:"expenses"`
+	History       []HistoryEntry    `json:"history"`
+	ConnectedApps []ExportedApp     `json:"connected_apps"`
+	Receipts      []ExportedReceipt `json:"receipts"`
+}
+
+// ExportedReceipt is a receipt photo; data is base64 in JSON.
+type ExportedReceipt struct {
+	ExpenseId string    `json:"expense_id"`
+	MimeType  string    `json:"mime_type"`
+	Data      []byte    `json:"data"`
+	AddedAt   time.Time `json:"added_at"`
 }
 
 // HistoryEntry is one change to an expense: before is null for a create
@@ -54,6 +63,11 @@ func (h *Handler) ExportData(ctx context.Context) (DataExport, error) {
 		h.logger.ErrorContext(ctx, "export history failed", "error", err)
 		return DataExport{}, pkg.InternalError
 	}
+	receipts, err := h.expenseRepo.ListReceipts(ctx, user.Id)
+	if err != nil {
+		h.logger.ErrorContext(ctx, "export receipts failed", "error", err)
+		return DataExport{}, pkg.InternalError
+	}
 	apps, err := h.oauthRepo.ListConnectedApps(ctx, user.Id, now)
 	if err != nil {
 		h.logger.ErrorContext(ctx, "export connected apps failed", "error", err)
@@ -66,6 +80,10 @@ func (h *Handler) ExportData(ctx context.Context) (DataExport, error) {
 		Expenses:      expenses,
 		History:       make([]HistoryEntry, len(logs)),
 		ConnectedApps: make([]ExportedApp, len(apps)),
+		Receipts:      make([]ExportedReceipt, len(receipts)),
+	}
+	for i, rc := range receipts {
+		out.Receipts[i] = ExportedReceipt{ExpenseId: rc.ExpenseId, MimeType: rc.MimeType, Data: rc.Data, AddedAt: rc.CreatedAt}
 	}
 	for i, l := range logs {
 		out.History[i] = HistoryEntry{ExpenseId: l.ExpenseId, Action: l.Action.String(), Before: l.Before, After: l.After, At: l.CreatedAt}

@@ -456,3 +456,53 @@ func TestExpenseRepository_UsersAreIsolated(t *testing.T) {
 	require.NoError(t, client.QueryRowContext(ctx, "SELECT user_id FROM logs WHERE expense_id = 'theirs'").Scan(&logUser))
 	assert.Equal(t, "user-2", logUser, "logs record the owner")
 }
+
+func TestExpenseRepository_Receipts(t *testing.T) {
+	ctx := context.Background()
+	repo, client := newTestExpenseRepo(t)
+	at := time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC)
+	require.NoError(t, repo.Create(ctx, newExpense("e1", "2026-11-07T13:20:00+01:00")))
+	require.NoError(t, repo.Create(ctx, newExpense("e2", "2026-11-07T14:20:00+01:00")))
+
+	rc := models.Receipt{ExpenseId: "e1", UserId: testUser, MimeType: "image/jpeg", Data: []byte{0xff, 0xd8, 0x01}, CreatedAt: at}
+	require.NoError(t, repo.SaveReceipt(ctx, rc))
+	got, err := repo.GetReceipt(ctx, testUser, "e1")
+	require.NoError(t, err)
+	assert.Equal(t, rc, got)
+
+	// Replacing keeps one per expense.
+	rc.Data, rc.MimeType = []byte("png"), "image/png"
+	require.NoError(t, repo.SaveReceipt(ctx, rc))
+	got, err = repo.GetReceipt(ctx, testUser, "e1")
+	require.NoError(t, err)
+	assert.Equal(t, "image/png", got.MimeType)
+
+	ids, err := repo.ReceiptIds(ctx, testUser)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]bool{"e1": true}, ids)
+	all, err := repo.ListReceipts(ctx, testUser)
+	require.NoError(t, err)
+	assert.Len(t, all, 1)
+
+	// Someone else's expense, or a missing one, can't get a receipt or show one.
+	assert.ErrorIs(t, repo.SaveReceipt(ctx, models.Receipt{ExpenseId: "e2", UserId: "intruder", MimeType: "image/png", Data: []byte("x"), CreatedAt: at}), ErrExpenseNotFound)
+	assert.ErrorIs(t, repo.SaveReceipt(ctx, models.Receipt{ExpenseId: "missing", UserId: testUser, MimeType: "image/png", Data: []byte("x"), CreatedAt: at}), ErrExpenseNotFound)
+	_, err = repo.GetReceipt(ctx, "intruder", "e1")
+	assert.ErrorIs(t, err, ErrReceiptNotFound)
+	_, err = repo.GetReceipt(ctx, testUser, "e2")
+	assert.ErrorIs(t, err, ErrReceiptNotFound)
+	require.NoError(t, repo.DeleteReceipt(ctx, "intruder", "e1"))
+	_, err = repo.GetReceipt(ctx, testUser, "e1")
+	assert.NoError(t, err, "only the owner can remove it")
+
+	// Deleting the expense deletes its receipt.
+	require.NoError(t, repo.Delete(ctx, testUser, "e1"))
+	var n int
+	require.NoError(t, client.QueryRow("SELECT COUNT(*) FROM receipts").Scan(&n))
+	assert.Zero(t, n)
+
+	require.NoError(t, repo.SaveReceipt(ctx, models.Receipt{ExpenseId: "e2", UserId: testUser, MimeType: "image/png", Data: []byte("x"), CreatedAt: at}))
+	require.NoError(t, repo.DeleteReceipt(ctx, testUser, "e2"))
+	_, err = repo.GetReceipt(ctx, testUser, "e2")
+	assert.ErrorIs(t, err, ErrReceiptNotFound)
+}

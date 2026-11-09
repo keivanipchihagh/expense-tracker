@@ -172,7 +172,7 @@ func (r *UserRepositoryImpl) Delete(ctx context.Context, id string) error {
 			return fmt.Errorf("find user's oauth clients: %w", err)
 		}
 
-		for _, table := range []string{"expenses", "logs", "sessions", "oauth_codes", "oauth_tokens"} {
+		for _, table := range []string{"expenses", "receipts", "logs", "sessions", "oauth_codes", "oauth_tokens"} {
 			if _, err := tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE user_id = ?", id); err != nil {
 				return fmt.Errorf("delete user's %s: %w", table, err)
 			}

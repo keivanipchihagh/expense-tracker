@@ -12,7 +12,7 @@
     <img class="scan-thumb" alt="Your receipt (tap to enlarge)" title="Tap to enlarge" data-scan-preview hidden>
     <svg class="scan-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><path d="M12 16.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"/></svg>
     <div class="scan-text" aria-live="polite">
-      {{if .Scanned}}<strong>Read from your receipt</strong><span>Check the details below, then add it.</span>
+      {{if .Scanned}}<strong>Read from your receipt</strong><span>Check the details below, then add it. The photo is kept with the expense.</span>
       {{else}}<strong>Scan a receipt</strong><span>Take a photo or choose one. You'll check the details before adding.</span>{{end}}
     </div>
     <label for="receipt-file" class="scan-button">{{if .Scanned}}Rescan{{else}}Scan{{end}}</label>
@@ -21,12 +21,14 @@
   {{with .ScanWarnings}}<ul class="scan-warnings">{{range .}}<li>{{.}}</li>{{end}}</ul>{{end}}
   {{end}}
   {{if .Errors}}<p class="alert" role="alert">Please fix the highlighted fields.</p>{{end}}
-  <form {{if .Id}}hx-post="/ui/expenses/{{.Id}}"{{else}}hx-post="/ui/expenses"{{end}} hx-target="#editor">
+  {{with index .Errors "receipt"}}<p class="alert" role="alert">{{.}}</p>{{end}}
+  <form {{if .Id}}hx-post="/ui/expenses/{{.Id}}"{{else}}hx-post="/ui/expenses" hx-encoding="multipart/form-data"{{end}} hx-target="#editor">
     <input type="hidden" name="from" value="{{.Range.From}}">
     <input type="hidden" name="to" value="{{.Range.To}}">
     <input type="hidden" name="filter_category" value="{{.Range.Category}}">
     <input type="hidden" name="filter_merchant" value="{{.Range.Merchant}}">
     <input type="hidden" name="tz_offset" value="{{.Values.TzOffset}}">
+    {{if and (not .Id) .ScanEnabled}}<input type="file" name="receipt" class="sr-only" tabindex="-1" aria-hidden="true" data-receipt-field>{{end}}
 
     <div class="amount-field {{if index .Errors "amount"}}invalid{{end}}">
       <span class="amount-symbol" aria-hidden="true">{{.Symbol}}</span>
@@ -65,6 +67,18 @@
         <textarea name="note" rows="2" maxlength="2000" placeholder="Optional">{{.Values.Note}}</textarea>
         {{with index .Errors "note"}}<small class="field-error">{{.}}</small>{{end}}
       </label>
+
+      {{if .HasReceipt}}
+      <div class="wide receipt-kept">
+        <a href="/ui/expenses/{{.Id}}/receipt" target="_blank" rel="noopener" title="Open the receipt">
+          <img src="/ui/expenses/{{.Id}}/receipt" alt="Receipt">
+        </a>
+        <div>
+          <span class="receipt-kept-title">Receipt</span>
+          <label class="checkbox"><input type="checkbox" name="remove_receipt" value="1"> Remove it when saving</label>
+        </div>
+      </div>
+      {{end}}
     </div>
 
     <div class="sheet-actions">

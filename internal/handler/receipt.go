@@ -12,6 +12,7 @@ import (
 	"github.com/keivanipchihagh/expense-tracker/internal/receipt"
 	"github.com/keivanipchihagh/expense-tracker/pkg"
 	"github.com/keivanipchihagh/expense-tracker/pkg/models"
+	"github.com/keivanipchihagh/expense-tracker/pkg/repositories"
 	"github.com/shopspring/decimal"
 )
 
@@ -69,16 +70,9 @@ func (h *Handler) ScanReceipt(ctx context.Context, image []byte) (ReceiptDraft, 
 	if h.scanner == nil {
 		return ReceiptDraft{}, ErrScanDisabled
 	}
-	switch {
-	case len(image) == 0:
-		return ReceiptDraft{}, pkg.NewValidationError(map[string]string{"receipt": "is required"})
-	case len(image) > MaxReceiptBytes:
-		return ReceiptDraft{}, pkg.NewValidationError(map[string]string{"receipt": "must be at most 4 MB"})
-	}
-	// Trust the bytes, not the file name or the browser's claim.
-	mimeType := http.DetectContentType(image)
-	if !receiptTypes[mimeType] {
-		return ReceiptDraft{}, pkg.NewValidationError(map[string]string{"receipt": "must be a JPEG, PNG or WebP image"})
+	mimeType, err := CheckReceiptImage(image)
+	if err != nil {
+		return ReceiptDraft{}, err
 	}
 	now := h.now()
 	if h.scans.full(uid, now) {
@@ -109,6 +103,89 @@ func (h *Handler) ScanReceipt(ctx context.Context, image []byte) (ReceiptDraft, 
 		return ReceiptDraft{}, &pkg.Error{Status: http.StatusUnprocessableEntity, Code: "not_a_receipt", Message: "That doesn't look like a receipt. Try a clearer photo of the whole receipt."}
 	}
 	return draftFrom(reading, now, currency), nil
+}
+
+// CheckReceiptImage returns the image's type, sniffed from its bytes (not
+// the file name or the browser's claim), or a validation error.
+func CheckReceiptImage(image []byte) (string, error) {
+	switch {
+	case len(image) == 0:
+		return "", pkg.NewValidationError(map[string]string{"receipt": "is required"})
+	case len(image) > MaxReceiptBytes:
+		return "", pkg.NewValidationError(map[string]string{"receipt": "must be at most 4 MB"})
+	}
+	mimeType := http.DetectContentType(image)
+	if !receiptTypes[mimeType] {
+		return "", pkg.NewValidationError(map[string]string{"receipt": "must be a JPEG, PNG or WebP image"})
+	}
+	return mimeType, nil
+}
+
+// AttachReceipt keeps a receipt photo with the signed-in user's expense,
+// replacing any earlier one.
+func (h *Handler) AttachReceipt(ctx context.Context, expenseId string, image []byte) error {
+	uid, err := userId(ctx)
+	if err != nil {
+		return err
+	}
+	mimeType, err := CheckReceiptImage(image)
+	if err != nil {
+		return err
+	}
+	err = h.expenseRepo.SaveReceipt(ctx, models.Receipt{ExpenseId: expenseId, UserId: uid, MimeType: mimeType, Data: image, CreatedAt: h.now()})
+	switch {
+	case errors.Is(err, repositories.ErrExpenseNotFound):
+		return pkg.ErrExpenseNotFound
+	case err != nil:
+		h.logger.ErrorContext(ctx, "save receipt failed", "error", err)
+		return pkg.InternalError
+	}
+	h.logger.InfoContext(ctx, "receipt attached", "expense_id", expenseId, "bytes", len(image))
+	return nil
+}
+
+// Receipt returns the receipt of the signed-in user's expense.
+func (h *Handler) Receipt(ctx context.Context, expenseId string) (models.Receipt, error) {
+	uid, err := userId(ctx)
+	if err != nil {
+		return models.Receipt{}, err
+	}
+	rc, err := h.expenseRepo.GetReceipt(ctx, uid, expenseId)
+	switch {
+	case errors.Is(err, repositories.ErrReceiptNotFound):
+		return models.Receipt{}, pkg.ErrReceiptNotFound
+	case err != nil:
+		h.logger.ErrorContext(ctx, "get receipt failed", "error", err)
+		return models.Receipt{}, pkg.InternalError
+	}
+	return rc, nil
+}
+
+// RemoveReceipt deletes the receipt of the signed-in user's expense, if any.
+func (h *Handler) RemoveReceipt(ctx context.Context, expenseId string) error {
+	uid, err := userId(ctx)
+	if err != nil {
+		return err
+	}
+	if err := h.expenseRepo.DeleteReceipt(ctx, uid, expenseId); err != nil {
+		h.logger.ErrorContext(ctx, "delete receipt failed", "error", err)
+		return pkg.InternalError
+	}
+	return nil
+}
+
+// ReceiptIds returns the ids of the signed-in user's expenses with a receipt.
+func (h *Handler) ReceiptIds(ctx context.Context) (map[string]bool, error) {
+	uid, err := userId(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ids, err := h.expenseRepo.ReceiptIds(ctx, uid)
+	if err != nil {
+		h.logger.ErrorContext(ctx, "list receipts failed", "error", err)
+		return nil, pkg.InternalError
+	}
+	return ids, nil
 }
 
 // draftFrom validates what the model read.

@@ -23,6 +23,9 @@ func TestExportData(t *testing.T) {
 	ts.expenseRepo.EXPECT().History(gomock.Any(), testUserId).Return([]models.Log{
 		{ExpenseId: "e1", UserId: testUserId, Action: models.LogActionCreate, After: json.RawMessage(`{"id":"e1"}`), CreatedAt: testNow},
 	}, nil)
+	ts.expenseRepo.EXPECT().ListReceipts(gomock.Any(), testUserId).Return([]models.Receipt{
+		{ExpenseId: "e1", UserId: testUserId, MimeType: "image/jpeg", Data: []byte("jpeg-bytes"), CreatedAt: testNow},
+	}, nil)
 	connected := testNow.Add(-time.Hour)
 	ts.oauthRepo.EXPECT().ListConnectedApps(gomock.Any(), testUserId, testNow).Return([]models.ConnectedApp{
 		{Client: models.OAuthClient{Id: "c1", Name: "Claude", CreatedAt: connected}, LastActiveAt: testNow},
@@ -35,6 +38,7 @@ func TestExportData(t *testing.T) {
 	assert.Equal(t, []models.Expense{expense}, data.Expenses)
 	assert.Equal(t, []HistoryEntry{{ExpenseId: "e1", Action: "create", After: json.RawMessage(`{"id":"e1"}`), At: testNow}}, data.History)
 	assert.Equal(t, []ExportedApp{{Name: "Claude", ConnectedAt: connected, LastActiveAt: testNow}}, data.ConnectedApps)
+	assert.Equal(t, []ExportedReceipt{{ExpenseId: "e1", MimeType: "image/jpeg", Data: []byte("jpeg-bytes"), AddedAt: testNow}}, data.Receipts)
 
 	b, err := json.Marshal(data)
 	require.NoError(t, err)

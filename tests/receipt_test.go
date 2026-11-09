@@ -2,6 +2,7 @@ package tests
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"mime/multipart"
@@ -170,4 +171,119 @@ func TestScan_FormCanBeAddedAfterwards(t *testing.T) {
 	require.Equal(t, http.StatusOK, status)
 	_, _, list := send(t, c, http.MethodGet, s.url+"/?from=2026-11-01&to=2026-11-30", nil, nil)
 	assert.True(t, strings.Contains(list, "Bakery") && strings.Contains(list, "4.20"))
+}
+
+// addWithReceipt submits the new expense form with a receipt photo, the
+// way the form does after a scan.
+func addWithReceipt(t *testing.T, s *testServer, c *http.Client, image []byte, merchant string) (int, string) {
+	t.Helper()
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	for k, v := range map[string]string{
+		"amount": "10.91", "category": "groceries", "merchant": merchant, "occurred_local": "2026-11-07T18:42:00", "tz_offset": "60",
+		"from": "2026-11-01", "to": "2026-11-30",
+	} {
+		require.NoError(t, mw.WriteField(k, v))
+	}
+	fw, err := mw.CreateFormFile("receipt", "receipt.jpg")
+	require.NoError(t, err)
+	_, err = fw.Write(image)
+	require.NoError(t, err)
+	require.NoError(t, mw.Close())
+	req, err := http.NewRequest(http.MethodPost, s.url+"/ui/expenses", &body)
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.Header.Set("HX-Request", "true")
+	resp, err := c.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	return resp.StatusCode, string(raw)
+}
+
+func TestReceipt_KeptWithTheExpense(t *testing.T) {
+	alice, bob, _, _ := twoUsers(t)
+	c := browser(t)
+	signIn(t, alice, c)
+
+	status, page := addWithReceipt(t, alice, c, receiptPng, "Rewe")
+	require.Equal(t, http.StatusOK, status)
+	require.Contains(t, page, `class="avatar receipt"`, "the list shows the receipt as the row's thumbnail")
+
+	var id string
+	require.NoError(t, alice.db.QueryRow("SELECT id FROM expenses WHERE merchant = 'Rewe'").Scan(&id))
+
+	// The image itself, for alice in the UI and through the API.
+	req, _ := http.NewRequest(http.MethodGet, alice.url+"/ui/expenses/"+id+"/receipt", nil)
+	resp, err := c.Do(req)
+	require.NoError(t, err)
+	raw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, receiptPng, raw)
+	assert.Equal(t, "image/png", resp.Header.Get("Content-Type"), "the type is the sniffed one")
+	assert.Equal(t, "nosniff", resp.Header.Get("X-Content-Type-Options"))
+	assert.Contains(t, resp.Header.Get("Content-Security-Policy"), "default-src 'none'")
+	assert.Equal(t, "private, max-age=86400", resp.Header.Get("Cache-Control"))
+	assert.Equal(t, http.StatusOK, alice.call(t, http.MethodGet, "/api/v1/expenses/"+id+"/receipt", "", nil))
+
+	// Nobody else can see it.
+	assert.Equal(t, http.StatusNotFound, bob.call(t, http.MethodGet, "/api/v1/expenses/"+id+"/receipt", "", nil))
+	other := browser(t)
+	signIn(t, bob, other)
+	status, _, _ = send(t, other, http.MethodGet, alice.url+"/ui/expenses/"+id+"/receipt", nil, nil)
+	assert.Equal(t, http.StatusNotFound, status)
+	status, _, _ = send(t, browser(t), http.MethodGet, alice.url+"/ui/expenses/"+id+"/receipt", nil, nil)
+	assert.Equal(t, http.StatusSeeOther, status, "signed out")
+
+	// It's in the export.
+	var data struct {
+		Receipts []map[string]any `json:"receipts"`
+	}
+	require.Equal(t, http.StatusOK, alice.call(t, http.MethodGet, "/api/v1/me/export", "", &data))
+	require.Len(t, data.Receipts, 1)
+	assert.Equal(t, id, data.Receipts[0]["expense_id"])
+	assert.Equal(t, base64.StdEncoding.EncodeToString(receiptPng), data.Receipts[0]["data"])
+
+	// Editing shows it, and can remove it.
+	_, _, form := send(t, c, http.MethodGet, alice.url+"/ui/expenses/"+id+"/edit", nil, nil)
+	assert.Contains(t, form, `<img src="/ui/expenses/`+id+`/receipt" alt="Receipt">`)
+	assert.Contains(t, form, `name="remove_receipt"`)
+	status, _, page = send(t, c, http.MethodPost, alice.url+"/ui/expenses/"+id, url.Values{
+		"amount": {"10.91"}, "category": {"groceries"}, "merchant": {"Rewe"}, "occurred_local": {"2026-11-07T18:42:00"}, "tz_offset": {"60"},
+		"remove_receipt": {"1"}, "from": {"2026-11-01"}, "to": {"2026-11-30"},
+	}, map[string]string{"HX-Request": "true"})
+	require.Equal(t, http.StatusOK, status)
+	assert.NotContains(t, page, `class="avatar receipt"`)
+	assert.Equal(t, http.StatusNotFound, alice.call(t, http.MethodGet, "/api/v1/expenses/"+id+"/receipt", "", nil))
+}
+
+func TestReceipt_GoesWithTheExpenseAndAccount(t *testing.T) {
+	s := newTestServer(t)
+	c := browser(t)
+	signIn(t, s, c)
+	_, _ = addWithReceipt(t, s, c, receiptPng, "One")
+	_, _ = addWithReceipt(t, s, c, receiptPng, "Two")
+	require.Equal(t, 2, count(t, s, "receipts", "1 = 1"))
+
+	var id string
+	require.NoError(t, s.db.QueryRow("SELECT id FROM expenses WHERE merchant = 'One'").Scan(&id))
+	status, _, _ := send(t, c, http.MethodPost, s.url+"/ui/expenses/"+id+"/delete", url.Values{"from": {"2026-11-01"}, "to": {"2026-11-30"}}, map[string]string{"HX-Request": "true"})
+	require.Equal(t, http.StatusOK, status)
+	assert.Equal(t, 1, count(t, s, "receipts", "1 = 1"), "deleting the expense deletes its receipt")
+
+	status, _, _ = send(t, c, http.MethodPost, s.url+"/settings/delete", url.Values{"password": {password}}, nil)
+	require.Equal(t, http.StatusSeeOther, status)
+	assert.Zero(t, count(t, s, "receipts", "1 = 1"), "deleting the account deletes the rest")
+}
+
+func TestReceipt_BadImageIsRefusedBeforeSaving(t *testing.T) {
+	s := newTestServer(t)
+	c := browser(t)
+	signIn(t, s, c)
+	status, page := addWithReceipt(t, s, c, []byte("<svg onload=alert(1)>"), "Sneaky")
+	assert.Equal(t, http.StatusOK, status, "the form comes back")
+	assert.Contains(t, page, "The receipt photo must be a JPEG, PNG or WebP image.")
+	assert.Zero(t, count(t, s, "expenses", "merchant = 'Sneaky'"), "nothing is saved")
 }

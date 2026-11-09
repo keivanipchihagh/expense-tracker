@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -183,10 +184,11 @@ func (s *Server) EditExpenseForm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.renderPartial(w, http.StatusOK, "form", formData{
-		Id:     e.Id,
-		Range:  filterFromQuery(r.URL.Query(), time.Now()),
-		Values: formValuesFrom(e),
-		Symbol: s.currencySymbol(r),
+		Id:         e.Id,
+		Range:      filterFromQuery(r.URL.Query(), time.Now()),
+		Values:     formValuesFrom(e),
+		Symbol:     s.currencySymbol(r),
+		HasReceipt: s.hasReceipt(r, e.Id),
 	})
 }
 
@@ -216,20 +218,58 @@ func (s *Server) DeleteExpenseSubmit(w http.ResponseWriter, r *http.Request) {
 // saveExpense creates (id == "") or updates an expense from the form. On a
 // validation error the form is shown again with the problems.
 func (s *Server) saveExpense(w http.ResponseWriter, r *http.Request, id string) {
-	if err := r.ParseForm(); err != nil {
+	// A new expense may carry its scanned receipt, so the form can be
+	// multipart.
+	if err := r.ParseMultipartForm(handler.MaxReceiptBytes); err != nil && !errors.Is(err, http.ErrNotMultipart) {
+		if _, tooBig := errors.AsType[*http.MaxBytesError](err); tooBig {
+			http.Error(w, "the receipt is too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "bad form", http.StatusBadRequest)
 		return
 	}
+	if r.MultipartForm != nil {
+		defer r.MultipartForm.RemoveAll()
+	}
 	rng := filterFromExpenseForm(r.PostForm, time.Now())
 	values := formValuesFromForm(r.PostForm)
+	receipt, err := uploadedFile(r, "receipt")
+	if err != nil {
+		http.Error(w, "the receipt couldn't be read", http.StatusBadRequest)
+		return
+	}
 
 	input, fieldErrors := values.toInput()
-	var err error
+	if len(receipt) > 0 && id == "" {
+		if _, err := handler.CheckReceiptImage(receipt); err != nil {
+			if appErr, ok := errors.AsType[*pkg.Error](err); ok {
+				if fieldErrors == nil {
+					fieldErrors = map[string]string{}
+				}
+				fieldErrors["receipt"] = "The receipt photo " + appErr.Fields["receipt"] + "."
+			}
+		}
+	}
+	var created models.Expense
 	if len(fieldErrors) == 0 {
 		if id == "" {
-			_, err = s.handler.CreateExpense(r.Context(), input)
+			created, err = s.handler.CreateExpense(r.Context(), input)
 		} else {
 			_, err = s.handler.UpdateExpense(r.Context(), id, input)
+		}
+	}
+	if err == nil && len(fieldErrors) == 0 {
+		// The expense is saved; a receipt that fails to save now (the image
+		// was checked above) is logged rather than undoing it.
+		switch {
+		case id == "" && len(receipt) > 0:
+			if err := s.handler.AttachReceipt(r.Context(), created.Id, receipt); err != nil {
+				slog.ErrorContext(r.Context(), "keep receipt failed", "expense_id", created.Id, "error", err)
+			}
+		case id != "" && r.PostForm.Get("remove_receipt") == "1":
+			if err := s.handler.RemoveReceipt(r.Context(), id); err != nil {
+				slog.ErrorContext(r.Context(), "remove receipt failed", "expense_id", id, "error", err)
+			}
 		}
 	}
 
@@ -244,10 +284,40 @@ func (s *Server) saveExpense(w http.ResponseWriter, r *http.Request, id string) 
 	}
 	if len(fieldErrors) > 0 {
 		// 200 so HTMX swaps the form back in with the errors.
-		s.renderPartial(w, http.StatusOK, "form", formData{Id: id, Range: rng, Values: values, Errors: fieldErrors, Symbol: s.currencySymbol(r), ScanEnabled: id == "" && s.handler.ScanEnabled()})
+		s.renderPartial(w, http.StatusOK, "form", formData{
+			Id: id, Range: rng, Values: values, Errors: fieldErrors, Symbol: s.currencySymbol(r),
+			ScanEnabled: id == "" && s.handler.ScanEnabled(),
+			// The page script puts the scanned photo back into the form.
+			Scanned:    id == "" && len(receipt) > 0,
+			HasReceipt: id != "" && s.hasReceipt(r, id),
+		})
 		return
 	}
 	s.renderSaved(w, r, rng)
+}
+
+// uploadedFile returns the bytes of the named file field, or nil if none
+// was sent.
+func uploadedFile(r *http.Request, field string) ([]byte, error) {
+	if r.MultipartForm == nil {
+		return nil, nil
+	}
+	file, _, err := r.FormFile(field)
+	if errors.Is(err, http.ErrMissingFile) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	return io.ReadAll(io.LimitReader(file, handler.MaxReceiptBytes+1))
+}
+
+// hasReceipt reports whether the user's expense has a receipt (false if it
+// can't be told; already logged).
+func (s *Server) hasReceipt(r *http.Request, id string) bool {
+	ids, err := s.handler.ReceiptIds(r.Context())
+	return err == nil && ids[id]
 }
 
 // currencySymbol is the display currency's symbol for forms. It falls back
@@ -377,6 +447,15 @@ func (s *Server) results(r *http.Request, filter listFilter) (resultsData, error
 		return resultsData{}, err
 	}
 	results := buildResults(filter.dateRange, expenses, currency)
+	receipts, err := s.handler.ReceiptIds(r.Context())
+	if err != nil {
+		return resultsData{}, err
+	}
+	for _, day := range results.Days {
+		for i := range day.Rows {
+			day.Rows[i].HasReceipt = receipts[day.Rows[i].Id]
+		}
+	}
 	results.Filter = filter
 	results.Presets = presets(time.Now(), filter.dateRange)
 	for i := range results.Presets {
@@ -637,6 +716,8 @@ type dayGroup struct {
 
 type expenseRow struct {
 	Id, Date, Time, Offset, Amount, Category, Merchant, Note string
+	// HasReceipt shows the receipt as the row's thumbnail.
+	HasReceipt bool
 }
 
 type summaryTotal struct {
@@ -745,6 +826,8 @@ type formData struct {
 	Scanned      bool
 	ScanError    string
 	ScanWarnings []string
+	// HasReceipt shows the kept receipt when editing, with a way to remove it.
+	HasReceipt bool
 }
 
 // Categories feeds the form's category select box.

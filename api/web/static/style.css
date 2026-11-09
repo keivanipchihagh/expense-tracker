@@ -445,6 +445,16 @@ input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible
 @keyframes spin { to { transform: rotate(360deg); } }
 .scan-warnings { margin: -4px 0 14px; padding: 8px 12px 8px 28px; border-radius: var(--radius-sm); background: color-mix(in srgb, #f59e0b 14%, transparent); font-size: .85rem; }
 .scan-warnings li + li { margin-top: 4px; }
+
+/* A receipt kept with an expense: the list row's thumbnail, and the
+   editor's preview with a way to remove it. */
+img.avatar.receipt { object-fit: cover; padding: 0; border: 1px solid var(--border); }
+.receipt-kept { display: flex; align-items: center; gap: 12px; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius); }
+.receipt-kept img { display: block; width: 56px; height: 56px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); }
+.receipt-kept > div { display: grid; gap: 2px; }
+.receipt-kept-title { font-weight: 600; font-size: .95rem; }
+.fields .receipt-kept .checkbox { display: flex; flex-direction: row; align-items: center; gap: 6px; color: var(--muted); font-size: .85rem; cursor: pointer; }
+.receipt-kept .checkbox input { width: 16px; height: 16px; min-height: 0; margin: 0; padding: 0; accent-color: var(--danger); }
 .sheet-head h2 { font-size: 1.1rem; font-weight: 600; }
 
 .amount-field { display: flex; align-items: center; gap: 8px; padding: 6px; border: 1px solid var(--border); border-radius: var(--radius); }
