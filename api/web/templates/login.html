@@ -2,7 +2,7 @@
 
 {{define "content"}}
 <section class="login">
-  <span class="brand-mark large" aria-hidden="true"></span>
+  {{template "logo" "large"}}
   <h1>Welcome back</h1>
   <p class="muted">Sign in to see your expenses.</p>
   {{if .Error}}<p class="alert" role="alert">{{.Error}}</p>{{end}}

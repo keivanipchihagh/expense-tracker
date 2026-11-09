@@ -73,8 +73,12 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .nav a:hover { color: var(--text); background: var(--subtle); }
 .nav a.active { color: var(--text); font-weight: 550; }
 .brand { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; color: var(--text); text-decoration: none; }
-.brand-mark { width: 18px; height: 18px; border-radius: 6px; background: var(--accent); }
-.brand-mark.large { display: inline-block; width: 40px; height: 40px; border-radius: 12px; }
+/* Logo: a receipt on an ink tile. The tile is the accent (ink), the paper is
+   the surface, so it inverts with the theme. */
+.logo { width: 22px; height: 22px; flex: none; stroke: none; }
+.logo.large { display: block; width: 48px; height: 48px; margin: 0 auto; }
+.logo-tile, .logo-ink { fill: var(--accent); }
+.logo-paper { fill: var(--surface); }
 
 /* Controls */
 

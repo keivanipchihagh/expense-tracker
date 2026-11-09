@@ -3,7 +3,7 @@
 {{define "content"}}
 <section class="error-page">
   <a class="brand" href="/">
-    <span class="brand-mark" aria-hidden="true"></span>expense-tracker
+    {{template "logo" ""}}expense-tracker
   </a>
   <div class="error-body">
     <p class="error-code">{{.Status}}</p>

@@ -6,6 +6,7 @@
   <meta name="color-scheme" content="light dark">
   <meta name="htmx-config" content='{"includeIndicatorStyles":false,"allowEval":false,"allowScriptTags":false}'>
   <title>{{.Title}} · expense-tracker</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/theme.js"></script>
   <script src="/static/htmx.min.js" defer></script>
@@ -15,7 +16,7 @@
   {{if .SignedIn}}
   <header class="topbar">
     <a class="brand" href="/">
-      <span class="brand-mark" aria-hidden="true"></span>expense-tracker
+      {{template "logo" ""}}expense-tracker
     </a>
     <nav class="nav">
       <a href="/" class="{{if eq .Nav "expenses"}}active{{end}}">Expenses</a>
@@ -46,3 +47,10 @@
     <svg class="icon-moon" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
   </span>
 </button>{{end}}
+
+{{define "logo"}}<svg class="logo{{if .}} {{.}}{{end}}" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+  <rect class="logo-tile" width="32" height="32" rx="9"/>
+  <path class="logo-paper" d="M10 7h12v18l-2-1.6-2 1.6-2-1.6-2 1.6-2-1.6-2 1.6z"/>
+  <rect class="logo-ink" x="13" y="11.5" width="6" height="2" rx="1"/>
+  <rect class="logo-ink" x="13" y="16" width="4" height="2" rx="1"/>
+</svg>{{end}}

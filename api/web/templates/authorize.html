@@ -2,7 +2,7 @@
 
 {{define "content"}}
 <section class="login">
-  <span class="brand-mark large" aria-hidden="true"></span>
+  {{template "logo" "large"}}
   {{with .Authorize}}
   <h1>Sign in to expense-tracker</h1>
   <p class="muted"><strong>{{with .Client.Name}}{{.}}{{else}}An unnamed app{{end}}</strong> wants access to your expenses.</p>
