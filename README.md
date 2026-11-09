@@ -1,5 +1,8 @@
 # expense-tracker
 
+![GitHub repo size](https://img.shields.io/github/repo-size/keivanipchihagh/expense-tracker)
+![GitHub License](https://img.shields.io/github/license/keivanipchihagh/expense-tracker)
+
 Self-hosted expense log. Single user, SQLite, one Go binary, runs in Docker.
 
 ## Contents
