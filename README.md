@@ -3,20 +3,15 @@
 ![GitHub repo size](https://img.shields.io/github/repo-size/keivanipchihagh/expense-tracker)
 ![GitHub License](https://img.shields.io/github/license/keivanipchihagh/expense-tracker)
 
-Self-hosted expense log. Single user, SQLite, one Go binary, runs in Docker.
+A self-hosted expense log you can talk to. Tell an AI agent "12.50 for lunch at Rewe" and it's recorded; browse, filter and analyse it in a small web UI. Single user, one Go binary, SQLite, Docker.
 
-## Contents
+## Features
 
-- [Run](#run)
-- [UI](#ui)
-- [MCP](#mcp)
-- [Authentication](#authentication)
-- [Tables](#tables)
-  - [Expense](#expense)
-  - [Log](#log)
-- [API](#api)
-- [Development](#development)
-- [License](#license)
+- **MCP server** for Claude, ChatGPT, Gemini and other agents: log, correct, look up and delete expenses
+- **Web UI**: list and filter expenses, quick add, CSV/JSON export, light and dark theme
+- **Analysis**: totals against the previous period, category breakdown, spending over time, top merchants
+- **Built-in OAuth 2.1** for agents, and a REST API
+- A change log of every edit
 
 ## Run
 
@@ -25,138 +20,43 @@ cp .env.template .env   # set AUTH_PASSWORD (openssl rand -base64 24)
 docker compose -f deploy/docker-compose.yaml --env-file .env up -d --build
 ```
 
-The database is stored in `data/expense.db`. Stop the container before opening or copying it (see [Log](#log)).
+Open http://localhost:8000 and sign in with `AUTH_PASSWORD`.
 
-## UI
+> Stop the container before opening or copying `data/expense.db` from the host; SQLite in WAL mode can corrupt otherwise.
 
-Open `PUBLIC_URL` (by default http://localhost:8000) and sign in with `AUTH_PASSWORD`.
+## Connect an agent
 
-- List expenses for a date range, with presets for this month, last month, this year and all time
-- Filter by category and merchant; the totals follow the filters
-- A total with a breakdown by category
-- Export the expenses shown (same dates and filters) as CSV or JSON, from the download menu (arrow icon) in the filter row. CSV cells that start like a formula (`=`, `+`, `-`, `@`) get a leading `'` so spreadsheets treat them as text
-- Display currency (€, $ or £), picked next to **Add expense** and saved on the server. Amounts are plain numbers: switching changes the symbol only, nothing is converted
-- Add, edit and delete expenses; time and time zone default to your browser's, and **Today**, **Yesterday** and **2 days ago** set the date while keeping the time
-- **Analysis** page for this month, last month, 3, 6 or 12 months, or all time, optionally without housing or for one category: totals with the change against the previous period, spending compared day by day with the previous period, a category breakdown, spending per day/week/month with its average, and top merchants
-- **Apps** page: see which apps (Claude, ChatGPT, …) are signed in through OAuth and revoke their access
-- Light/dark switch in the top bar; follows your system theme until you pick one (remembered in the browser)
-
-The UI is server-rendered (Go templates and [HTMX](https://htmx.org), bundled in the binary). Signing in sets an `HttpOnly`, `SameSite=Strict` session cookie valid for 30 days (named with the `__Host-` prefix when `PUBLIC_URL` is HTTPS). The cookie only opens the UI; the JSON API always needs a bearer token.
-
-## MCP
-
-An MCP server runs at `/mcp` (Streamable HTTP), so AI agents can log, correct and look up expenses for you. It uses the same validation and change log as the API.
-
-| Tool | Does |
-|---|---|
-| `create_expense` | Record an expense |
-| `list_expenses` | List expenses, optionally filtered by `date_from`, `date_to`, `category` and `merchant` |
-| `get_expense` | Get one expense by id |
-| `update_expense` | Change the fields sent; `null` clears `merchant` or `note` |
-| `delete_expense` | Delete an expense permanently |
-
-Clients log in with OAuth (see [Authentication](#authentication)): add the server and sign in with `AUTH_PASSWORD` when the browser opens. For example, with Claude Code:
+Add the MCP server and sign in when the browser opens. With Claude Code:
 
 ```bash
 claude mcp add --transport http expense-tracker http://localhost:8000/mcp
 ```
 
-ChatGPT, claude.ai and Gemini connect from the internet, so they need `PUBLIC_URL` set to a public HTTPS address that reaches the server.
+Tools: `create_expense`, `list_expenses`, `get_expense`, `update_expense`, `delete_expense`.
 
-## Authentication
-
-Every `/api/` endpoint and `/mcp` requires `Authorization: Bearer <access token>`. Tokens come from a built-in OAuth 2.1 server, the flow MCP clients such as Claude, ChatGPT and Gemini use:
-
-1. The client calls the API, gets `401`, and finds the OAuth endpoints through `/.well-known/oauth-protected-resource`.
-2. It registers itself (`POST /oauth/register`) and opens `/oauth/authorize` in your browser.
-3. You sign in with `AUTH_PASSWORD`. The page shows which app is asking and where it will redirect.
-4. The client exchanges the one-time code for an access token (valid 1 hour) and a refresh token (30 days, single use).
-
-PKCE (S256) is required. Tokens and codes are stored only as hashes. After 10 wrong passwords in 15 minutes (on this page or the UI sign-in), both are locked for the rest of that window; tokens and sessions already issued keep working. Registration is open, as MCP clients expect, but capped at 20 new clients per hour, and clients that never sign in are deleted after a day. Revoke an app on the **Apps** page.
-
-Clients connecting from the internet (ChatGPT, claude.ai, Gemini) need `PUBLIC_URL` set to an HTTPS address that reaches the server, e.g. a Cloudflare Tunnel.
-
-| Endpoint | Purpose |
-|---|---|
-| `GET /.well-known/oauth-protected-resource` | Which authorization server protects this API (RFC 9728) |
-| `GET /.well-known/oauth-authorization-server` | OAuth endpoints and capabilities (RFC 8414) |
-| `POST /oauth/register` | Dynamic client registration (RFC 7591) |
-| `GET/POST /oauth/authorize` | Login page, styled like the UI (with the theme switch) |
-| `POST /oauth/token` | `authorization_code` and `refresh_token` grants |
-
-## Tables
-
-### Expense
-
-One row per expense, in the `expenses` table.
-
-| Field | Required | Notes |
-|---|---|---|
-| `id` | server | UUIDv7 |
-| `amount` | yes | Decimal string or number, > 0, at most 2 decimal places, e.g. `"12.50"` |
-| `occurred_at` | yes | RFC 3339 **with offset**, e.g. `2026-11-07T13:20:00+01:00`; the offset is kept |
-| `category` | yes | `food`, `groceries`, `transport`, `housing`, `utilities`, `health`, `entertainment`, `shopping`, `travel`, `subscriptions`, `education`, `gifts`, `other` |
-| `merchant` | no | Up to 200 characters |
-| `note` | no | Up to 2000 characters, only what the user adds |
-| `created_at` | server | UTC |
-| `updated_at` | server | UTC |
-
-### Log
-
-One row per change to an expense, in the `logs` table. A log row is written in the same transaction as the change, so the two can't disagree. There is no API for logs; read them from the database.
-
-| Field | Notes |
-|---|---|
-| `id` | Auto-increment |
-| `expense_id` | The changed expense; kept after the expense is deleted |
-| `action` | `create`, `update` or `delete` |
-| `before` | JSON snapshot of the expense before the change; null on create |
-| `after` | JSON snapshot of the expense after the change; null on delete |
-| `created_at` | UTC |
-
-### Setting
-
-The owner's preferences, in the `settings` table as `key`/`value` rows. Today there is one: `currency`, the display currency (`EUR`, `USD` or `GBP`; `EUR` until changed).
-
-```bash
-docker compose -f deploy/docker-compose.yaml --env-file .env stop
-sqlite3 data/expense.db "SELECT action, before, after FROM logs WHERE expense_id = '<id>' ORDER BY id"
-```
-
-> **Stop the container before opening `data/expense.db` from the host.** SQLite runs in WAL mode, which coordinates readers and writers through shared memory and only works when all of them run on the same machine. On Docker Desktop the container runs in a VM, so a host `sqlite3` and the running container can corrupt the database. The same goes for copying the file as a backup.
+Agents that connect from the internet (claude.ai, ChatGPT, Gemini) need `PUBLIC_URL` set to a public HTTPS address, e.g. a Cloudflare Tunnel.
 
 ## API
 
-| Method | Path | Description |
-|---|---|---|
-| GET | `/health` | Service status (`{"status":"ok"}`); the version isn't exposed |
-| POST | `/api/v1/expenses` | Create an expense |
-| GET | `/api/v1/expenses?date_from=&date_to=&category=&merchant=` | List expenses, oldest first. All parameters are optional: dates are local (`YYYY-MM-DD`, inclusive), `category` matches exactly, `merchant` matches part of the name ignoring case |
-| GET | `/api/v1/expenses/{id}` | Get an expense |
-| PATCH | `/api/v1/expenses/{id}` | Update the fields sent; `null` clears an optional field |
-| DELETE | `/api/v1/expenses/{id}` | Delete an expense permanently |
+`/api/v1/expenses` supports create, list (filter by `date_from`, `date_to`, `category`, `merchant`), get, update (`PATCH`, merge patch) and delete. It needs an OAuth bearer token; agents get one automatically, and [MCP Inspector](https://github.com/modelcontextprotocol/inspector) can get one by hand.
 
 ```bash
-curl -X POST localhost:8000/api/v1/expenses -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+curl -X POST localhost:8000/api/v1/expenses -H "Authorization: Bearer $TOKEN" \
   -d '{"amount":"12.50","occurred_at":"2026-11-07T13:20:00+01:00","category":"food","merchant":"Rewe"}'
 ```
 
-Errors look like `{"error":{"code":"validation_failed","message":"...","fields":{"amount":"must be greater than zero"}}}`.
-
 ## Development
 
-Requires Go 1.27+ and Docker.
+Requires Go 1.27+.
 
 ```bash
-make lint     # go fix, go vet, gofmt check
-make test     # all tests with the race detector; coverage in .coverage/
-make mocks    # regenerate *_mock.go after changing a repository interface
-AUTH_PASSWORD=... go run .   # run locally; uses data/expense.db and port 8000
+make lint    # go fix, go vet, gofmt
+make test    # tests with the race detector
+make mocks   # regenerate mocks after changing a repository interface
+AUTH_PASSWORD=... go run .
 ```
 
-Configuration is read from environment variables (see `.env.template`): `AUTH_PASSWORD` (required), `PUBLIC_URL`, `LOG_LEVEL`, `HTTP_PORT`, `HTTP_REQUEST_TIMEOUT`, `HTTP_MAX_BODY_BYTES`, `SQLITE_PATH`.
-
-To get a token by hand, run the OAuth flow with [MCP Inspector](https://github.com/modelcontextprotocol/inspector) or follow the steps in `tests/api_test.go`.
+Configuration is read from the environment; see [`.env.template`](.env.template).
 
 ## License
 
