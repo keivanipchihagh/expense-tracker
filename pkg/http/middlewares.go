@@ -129,31 +129,41 @@ func SecurityHeadersMiddleware() Middleware {
 	}
 }
 
-// TimeoutMiddleware cancels the request context after d. Handlers and the
-// database calls they make abort once it fires. Zero disables it.
-func TimeoutMiddleware(d time.Duration) Middleware {
+// TimeoutMiddleware cancels the request context after d, or after
+// perPath[path] for the paths listed there. Handlers and the database calls
+// they make abort once it fires. Zero disables it.
+func TimeoutMiddleware(d time.Duration, perPath map[string]time.Duration) Middleware {
 	return func(h http.Handler) http.Handler {
 		if d <= 0 {
 			return h
 		}
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx, cancel := context.WithTimeout(r.Context(), d)
+			limit := d
+			if p, ok := perPath[r.URL.Path]; ok {
+				limit = p
+			}
+			ctx, cancel := context.WithTimeout(r.Context(), limit)
 			defer cancel()
 			h.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }
 
-// MaxBodyBytesMiddleware caps the request body at n bytes; reading past
-// the limit returns an error. Zero disables it.
-func MaxBodyBytesMiddleware(n int64) Middleware {
+// MaxBodyBytesMiddleware caps the request body at n bytes, or at
+// perPath[path] for the paths listed there; reading past the limit returns
+// an error. Zero disables it.
+func MaxBodyBytesMiddleware(n int64, perPath map[string]int64) Middleware {
 	return func(h http.Handler) http.Handler {
 		if n <= 0 {
 			return h
 		}
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Body != nil {
-				r.Body = http.MaxBytesReader(w, r.Body, n)
+				limit := n
+				if p, ok := perPath[r.URL.Path]; ok {
+					limit = p
+				}
+				r.Body = http.MaxBytesReader(w, r.Body, limit)
 			}
 			h.ServeHTTP(w, r)
 		})

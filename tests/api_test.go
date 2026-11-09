@@ -82,7 +82,7 @@ func newTestServerWith(t *testing.T, signupEnabled bool) *testServer {
 
 	h := handler.NewHandler(expenseRepo, oauthRepo, sessionRepo, userRepo, srv.URL, signupEnabled)
 	h.SetBcryptCost(bcrypt.MinCost)
-	routes = pkgHttp.NewHttpServer(api.NewServer(h, "test", srv.URL).Handler(), 5*time.Second, 1<<20).Handler
+	routes = pkgHttp.NewHttpServer(api.NewServer(h, "test", srv.URL).Handler(), 5*time.Second, 1<<20, api.RouteLimits()...).Handler
 
 	s := &testServer{url: srv.URL, db: db, h: h, email: email, password: password}
 	s.addUser(t, email, password)

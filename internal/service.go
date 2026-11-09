@@ -11,6 +11,7 @@ import (
 	"github.com/keivanipchihagh/expense-tracker/api"
 	"github.com/keivanipchihagh/expense-tracker/internal/config"
 	"github.com/keivanipchihagh/expense-tracker/internal/handler"
+	"github.com/keivanipchihagh/expense-tracker/internal/receipt"
 	"github.com/keivanipchihagh/expense-tracker/pkg/db/sqlite"
 	pkgHttp "github.com/keivanipchihagh/expense-tracker/pkg/http"
 	"github.com/keivanipchihagh/expense-tracker/pkg/repositories"
@@ -67,6 +68,9 @@ func Run() {
 
 	// Initialize handler and API
 	h := handler.NewHandler(expenseRepo, oauthRepo, sessionRepo, userRepo, cfg.PublicUrl, cfg.SignupEnabled)
+	if cfg.OpenRouterApiKey != "" {
+		h.SetReceiptScanner(receipt.NewOpenRouter(cfg.OpenRouterApiKey, cfg.OpenRouterModel).WithBaseUrl(cfg.OpenRouterBaseUrl))
+	}
 
 	// Give data from before accounts existed an owner
 	if err := adoptLegacyData(ctx, db, h, cfg); err != nil {
@@ -75,12 +79,12 @@ func Run() {
 	server := api.NewServer(h, cfg.AppVersion, cfg.PublicUrl)
 
 	// Start HTTP server: the API needs a bearer token, the UI a session
-	httpServer := pkgHttp.NewHttpServer(server.Handler(), cfg.HttpRequestTimeout, cfg.HttpMaxBodyBytes)
+	httpServer := pkgHttp.NewHttpServer(server.Handler(), cfg.HttpRequestTimeout, cfg.HttpMaxBodyBytes, api.RouteLimits()...)
 	addr := fmt.Sprintf("0.0.0.0:%d", cfg.HttpPort)
 	if err := httpServer.Start(addr); err != nil {
 		fatal("failed to start http server", "addr", addr, "error", err)
 	}
-	slog.Info("service started", "version", cfg.AppVersion, "addr", addr, "public_url", cfg.PublicUrl, "database", cfg.SqlitePath)
+	slog.Info("service started", "version", cfg.AppVersion, "addr", addr, "public_url", cfg.PublicUrl, "database", cfg.SqlitePath, "receipt_scanning", h.ScanEnabled())
 
 	// Wait for a termination signal, then shut down
 	<-ctx.Done()

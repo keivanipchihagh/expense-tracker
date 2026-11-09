@@ -21,6 +21,8 @@ func TestNewConfig(t *testing.T) {
 		SqlitePath:         "data/expense.db",
 		PublicUrl:          "http://localhost:8000",
 		SignupEnabled:      true,
+		OpenRouterModel:    "nvidia/nemotron-3.5-super-vl:free",
+		OpenRouterBaseUrl:  "https://openrouter.ai/api/v1",
 	}
 
 	tests := []struct {
@@ -46,6 +48,8 @@ func TestNewConfig(t *testing.T) {
 				"PUBLIC_URL":           "https://expenses.example.com/",
 				"SIGNUP_ENABLED":       "false",
 				"OWNER_EMAIL":          "keivan@example.com",
+				"OPENROUTER_API_KEY":   "sk-or-test",
+				"OPENROUTER_MODEL":     "google/gemma-4-31b-it:free",
 				"AUTH_PASSWORD":        testPassword,
 			},
 			want: Config{
@@ -58,6 +62,9 @@ func TestNewConfig(t *testing.T) {
 				PublicUrl:          "https://expenses.example.com",
 				SignupEnabled:      false,
 				OwnerEmail:         "keivan@example.com",
+				OpenRouterApiKey:   "sk-or-test",
+				OpenRouterModel:    "google/gemma-4-31b-it:free",
+				OpenRouterBaseUrl:  "https://openrouter.ai/api/v1",
 				AuthPassword:       testPassword,
 			},
 		},
@@ -82,7 +89,7 @@ func TestNewConfig(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Make sure a password from the developer's shell doesn't leak in.
-			for _, k := range []string{"AUTH_PASSWORD", "OWNER_EMAIL", "SIGNUP_ENABLED"} {
+			for _, k := range []string{"AUTH_PASSWORD", "OWNER_EMAIL", "SIGNUP_ENABLED", "OPENROUTER_API_KEY", "OPENROUTER_MODEL", "OPENROUTER_BASE_URL"} {
 				t.Setenv(k, "") // restores the original value after the test
 				require.NoError(t, os.Unsetenv(k))
 			}

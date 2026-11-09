@@ -18,15 +18,33 @@ type HttpServer struct {
 	*http.Server
 }
 
+// RouteLimits replaces the request timeout and body size limit for one
+// path, e.g. an upload that waits on a slow upstream. Zero keeps the
+// server-wide value.
+type RouteLimits struct {
+	Path         string
+	Timeout      time.Duration
+	MaxBodyBytes int64
+}
+
 // NewHttpServer wraps handler with the middleware chain, outermost first:
 // recover → logging → security headers → timeout → max body size.
-func NewHttpServer(handler http.Handler, requestTimeout time.Duration, maxBodyBytes int64) *HttpServer {
+func NewHttpServer(handler http.Handler, requestTimeout time.Duration, maxBodyBytes int64, routes ...RouteLimits) *HttpServer {
+	timeouts, bodies := map[string]time.Duration{}, map[string]int64{}
+	for _, r := range routes {
+		if r.Timeout > 0 {
+			timeouts[r.Path] = r.Timeout
+		}
+		if r.MaxBodyBytes > 0 {
+			bodies[r.Path] = r.MaxBodyBytes
+		}
+	}
 	chain := MiddlewareChain(
 		RecoverMiddleware(),
 		LoggingMiddleware(),
 		SecurityHeadersMiddleware(),
-		TimeoutMiddleware(requestTimeout),
-		MaxBodyBytesMiddleware(maxBodyBytes),
+		TimeoutMiddleware(requestTimeout, timeouts),
+		MaxBodyBytesMiddleware(maxBodyBytes, bodies),
 	)
 
 	return &HttpServer{

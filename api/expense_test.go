@@ -108,7 +108,7 @@ func TestCreateExpense_Endpoint(t *testing.T) {
 
 	t.Run("body too large", func(t *testing.T) {
 		routes, _ := newTestRoutes(t)
-		limited := pkgHttp.MaxBodyBytesMiddleware(16)(routes)
+		limited := pkgHttp.MaxBodyBytesMiddleware(16, nil)(routes)
 
 		rec := do(limited, http.MethodPost, "/api/v1/expenses", `{"note":"`+strings.Repeat("x", 64)+`"}`)
 		require.Equal(t, http.StatusRequestEntityTooLarge, rec.Code)

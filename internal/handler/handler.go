@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/keivanipchihagh/expense-tracker/internal/receipt"
 	"github.com/keivanipchihagh/expense-tracker/pkg"
 	"github.com/keivanipchihagh/expense-tracker/pkg/repositories"
 	"golang.org/x/crypto/bcrypt"
@@ -25,6 +26,9 @@ type Handler struct {
 	logins        *keyedLimiter
 	registrations *rateLimiter
 	signups       *rateLimiter
+	// scanner reads receipts (nil: scanning is off); scans limits it per user.
+	scanner receipt.Scanner
+	scans   *keyedLimiter
 	// bcryptCost is the cost of new password hashes; tests lower it.
 	bcryptCost int
 	now        func() time.Time
@@ -55,6 +59,7 @@ func NewHandler(
 		logins:        newKeyedLimiter(maxFailedLogins, failedLoginWindow),
 		registrations: newRateLimiter(maxRegistrations, registrationWindow),
 		signups:       newRateLimiter(maxSignups, signupWindow),
+		scans:         newKeyedLimiter(maxScans, scanWindow),
 		bcryptCost:    bcrypt.DefaultCost,
 		now:           time.Now,
 		logger:        slog.Default().With("module", "handler"),

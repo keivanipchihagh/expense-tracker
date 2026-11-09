@@ -6,6 +6,20 @@
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
     </button>
   </header>
+  {{if and (not .Id) .ScanEnabled}}
+  <div class="scan{{if .Scanned}} scanned{{end}}" data-scan>
+    <input type="file" id="receipt-file" class="sr-only" accept="image/*" data-scan-input>
+    <img class="scan-thumb" alt="Your receipt (tap to enlarge)" title="Tap to enlarge" data-scan-preview hidden>
+    <svg class="scan-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><path d="M12 16.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"/></svg>
+    <div class="scan-text" aria-live="polite">
+      {{if .Scanned}}<strong>Read from your receipt</strong><span>Check the details below, then add it.</span>
+      {{else}}<strong>Scan a receipt</strong><span>Take a photo or choose one. You'll check the details before adding.</span>{{end}}
+    </div>
+    <label for="receipt-file" class="scan-button">{{if .Scanned}}Rescan{{else}}Scan{{end}}</label>
+  </div>
+  {{with .ScanError}}<p class="alert" role="alert">{{.}}</p>{{end}}
+  {{with .ScanWarnings}}<ul class="scan-warnings">{{range .}}<li>{{.}}</li>{{end}}</ul>{{end}}
+  {{end}}
   {{if .Errors}}<p class="alert" role="alert">Please fix the highlighted fields.</p>{{end}}
   <form {{if .Id}}hx-post="/ui/expenses/{{.Id}}"{{else}}hx-post="/ui/expenses"{{end}} hx-target="#editor">
     <input type="hidden" name="from" value="{{.Range.From}}">

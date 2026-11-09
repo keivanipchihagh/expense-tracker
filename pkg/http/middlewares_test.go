@@ -83,7 +83,7 @@ func TestTimeoutMiddleware(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var hasDeadline bool
-			serve(t, TimeoutMiddleware(tt.timeout), func(w http.ResponseWriter, r *http.Request) {
+			serve(t, TimeoutMiddleware(tt.timeout, nil), func(w http.ResponseWriter, r *http.Request) {
 				_, hasDeadline = r.Context().Deadline()
 			}, httptest.NewRequest(http.MethodGet, "/", nil))
 
@@ -108,7 +108,7 @@ func TestMaxBodyBytesMiddleware(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var readErr error
-			serve(t, MaxBodyBytesMiddleware(tt.limit), func(w http.ResponseWriter, r *http.Request) {
+			serve(t, MaxBodyBytesMiddleware(tt.limit, nil), func(w http.ResponseWriter, r *http.Request) {
 				_, readErr = io.ReadAll(r.Body)
 			}, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(tt.body)))
 
@@ -119,6 +119,32 @@ func TestMaxBodyBytesMiddleware(t *testing.T) {
 			require.NoError(t, readErr)
 		})
 	}
+}
+
+func TestRouteLimits(t *testing.T) {
+	timeouts := map[string]time.Duration{"/slow": time.Minute}
+	deadline := func(path string) time.Duration {
+		var left time.Duration
+		serve(t, TimeoutMiddleware(time.Second, timeouts), func(w http.ResponseWriter, r *http.Request) {
+			d, _ := r.Context().Deadline()
+			left = time.Until(d)
+		}, httptest.NewRequest(http.MethodGet, path, nil))
+		return left
+	}
+	assert.Greater(t, deadline("/slow"), 30*time.Second, "the listed path gets its own timeout")
+	assert.LessOrEqual(t, deadline("/slow/other"), time.Second, "only that exact path")
+	assert.LessOrEqual(t, deadline("/"), time.Second)
+
+	bodies := map[string]int64{"/upload": 10}
+	read := func(path string) error {
+		var err error
+		serve(t, MaxBodyBytesMiddleware(4, bodies), func(w http.ResponseWriter, r *http.Request) {
+			_, err = io.ReadAll(r.Body)
+		}, httptest.NewRequest(http.MethodPost, path, strings.NewReader("12345")))
+		return err
+	}
+	assert.NoError(t, read("/upload"), "the listed path may send more")
+	assert.Error(t, read("/"), "others keep the server-wide limit")
 }
 
 func TestBearerAuthMiddleware(t *testing.T) {

@@ -90,6 +90,140 @@
     if (menu && event.target.closest(".menu a")) menu.removeAttribute("open");
   });
 
+  // Receipt scanning. The photo is shrunk to at most 1600px (JPEG) in the
+  // browser, sent with the new expense form's hidden fields, and the server
+  // answers with the form filled in for the user to check. The photo stays
+  // on screen next to it while they do.
+  var SCAN_MAX_SIDE = 1600;
+
+  function shrink(file) {
+    return new Promise(function (resolve) {
+      var url = URL.createObjectURL(file);
+      var img = new Image();
+      img.onload = function () {
+        var scale = Math.min(1, SCAN_MAX_SIDE / Math.max(img.naturalWidth, img.naturalHeight));
+        var canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.naturalWidth * scale);
+        canvas.height = Math.round(img.naturalHeight * scale);
+        canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+        URL.revokeObjectURL(url);
+        canvas.toBlob(function (blob) {
+          resolve(blob && blob.size < file.size ? blob : file);
+        }, "image/jpeg", 0.85);
+      };
+      // A format the browser can't draw (e.g. HEIC outside Safari) is sent
+      // as it is; the server says if it can't use it.
+      img.onerror = function () {
+        URL.revokeObjectURL(url);
+        resolve(file);
+      };
+      img.src = url;
+    });
+  }
+
+  function setScanText(zone, title, detail) {
+    var text = zone.querySelector(".scan-text");
+    text.innerHTML = "";
+    var strong = document.createElement("strong");
+    strong.textContent = title;
+    var span = document.createElement("span");
+    span.textContent = detail;
+    text.append(strong, span);
+  }
+
+  function showPreview(url) {
+    var img = document.querySelector("#editor [data-scan-preview]");
+    if (img && url) {
+      img.src = url;
+      img.hidden = false;
+    }
+  }
+
+  function scanReceipt(file) {
+    var zone = document.querySelector("#editor [data-scan]");
+    if (!zone || !file || zone.classList.contains("busy")) return;
+    if (!/^image\//.test(file.type)) {
+      setScanText(zone, "That's not an image", "Choose a photo of the receipt.");
+      return;
+    }
+    var sheet = zone.closest(".sheet");
+    var form = sheet.querySelector("form");
+    var previewUrl = URL.createObjectURL(file);
+    zone.classList.add("busy");
+    sheet.classList.add("busy");
+    showPreview(previewUrl);
+    setScanText(zone, "Reading your receipt", "This can take up to a minute.");
+
+    shrink(file)
+      .then(function (image) {
+        var body = new FormData();
+        ["from", "to", "filter_category", "filter_merchant", "tz_offset"].forEach(function (name) {
+          var input = form.querySelector('[name="' + name + '"]');
+          if (input) body.append(name, input.value);
+        });
+        body.append("receipt", image, "receipt.jpg");
+        return fetch("/ui/expenses/scan", { method: "POST", body: body, credentials: "same-origin", headers: { "HX-Request": "true" } });
+      })
+      .then(function (response) {
+        if (response.status === 401) {
+          window.location.href = "/login";
+          return;
+        }
+        return response.text().then(function (html) {
+          htmx.swap(document.getElementById("editor"), html, { swapStyle: "innerHTML" });
+          showPreview(previewUrl);
+        });
+      })
+      .catch(function () {
+        zone.classList.remove("busy");
+        sheet.classList.remove("busy");
+        setScanText(zone, "Couldn't send the photo", "Check your connection and try again.");
+      });
+  }
+
+  // Tap the photo to see it full size while checking the fields.
+  document.addEventListener("click", function (event) {
+    if (event.target.matches("[data-scan-preview]")) event.target.classList.toggle("zoomed");
+  });
+
+  document.addEventListener("change", function (event) {
+    if (event.target.matches("[data-scan-input]")) {
+      scanReceipt(event.target.files[0]);
+      event.target.value = "";
+    }
+  });
+
+  // Drop a photo anywhere on the new expense sheet, or paste one.
+  document.addEventListener("dragover", function (event) {
+    var sheet = event.target.closest && event.target.closest(".sheet");
+    if (sheet && sheet.querySelector("[data-scan]")) {
+      event.preventDefault();
+      sheet.classList.add("drag-over");
+    }
+  });
+  document.addEventListener("dragleave", function (event) {
+    var sheet = event.target.closest && event.target.closest(".sheet");
+    if (sheet && !sheet.contains(event.relatedTarget)) sheet.classList.remove("drag-over");
+  });
+  document.addEventListener("drop", function (event) {
+    var sheet = event.target.closest && event.target.closest(".sheet");
+    if (sheet && sheet.querySelector("[data-scan]")) {
+      event.preventDefault();
+      sheet.classList.remove("drag-over");
+      scanReceipt(event.dataTransfer.files[0]);
+    }
+  });
+  document.addEventListener("paste", function (event) {
+    if (!document.querySelector("#editor [data-scan]")) return;
+    var item = Array.prototype.find.call(event.clipboardData.items, function (i) {
+      return i.kind === "file" && /^image\//.test(i.type);
+    });
+    if (item) {
+      event.preventDefault();
+      scanReceipt(item.getAsFile());
+    }
+  });
+
   // Confirmation dialogs: [data-dialog-open="id"] opens one, [data-dialog-close]
   // or a click on the backdrop closes it. A dialog rendered with an error
   // (data-show-on-load) opens straight away.
@@ -108,6 +242,12 @@
 
   document.addEventListener("keydown", function (event) {
     if (event.key === "Escape") {
+      // An enlarged receipt closes first, keeping the form.
+      var zoomed = document.querySelector(".scan-thumb.zoomed");
+      if (zoomed) {
+        zoomed.classList.remove("zoomed");
+        return;
+      }
       closeEditor();
       closeMenus(null);
     }

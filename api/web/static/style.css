@@ -398,6 +398,53 @@ input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible
   animation: rise .18s ease-out;
 }
 .sheet-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+
+/* Receipt scanner at the top of a new expense: the whole row opens the
+   file picker (on phones: camera or photo library), and a photo can also
+   be dropped on the sheet or pasted. */
+.scan {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  transition: border-color .15s, background .15s;
+}
+.scan:hover, .scan:focus-within, .sheet.drag-over .scan { border-color: var(--text); background: var(--subtle); }
+.scan.scanned { border-style: solid; }
+.scan-icon { flex: none; width: 22px; height: 22px; color: var(--muted); }
+.scan-thumb { flex: none; width: 44px; height: 44px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); }
+.scan-thumb:not([hidden]) + .scan-icon { display: none; }
+/* Above the row-wide label, so tapping the photo enlarges it instead. */
+.scan-thumb { position: relative; z-index: 1; cursor: zoom-in; }
+.scan-thumb.zoomed {
+  position: fixed;
+  inset: 16px;
+  z-index: 40;
+  width: calc(100% - 32px);
+  height: calc(100% - 32px);
+  object-fit: contain;
+  border: 0;
+  border-radius: 0;
+  background: var(--backdrop);
+  cursor: zoom-out;
+}
+.scan-text { display: grid; flex: 1; min-width: 0; line-height: 1.35; }
+.scan-text strong { font-weight: 600; font-size: .95rem; }
+.scan-text span { color: var(--muted); font-size: .8rem; }
+.scan-button { flex: none; height: 32px; padding: 0 14px; display: inline-flex; align-items: center; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); font-size: .9rem; cursor: pointer; }
+/* The label covers the row, so a click anywhere opens the picker. */
+.scan-button::after { content: ""; position: absolute; inset: 0; }
+.scan.busy { pointer-events: none; }
+.scan.busy .scan-button { opacity: .5; }
+.scan.busy .scan-text strong::after { content: ""; display: inline-block; width: 10px; height: 10px; margin-left: 8px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; vertical-align: -1px; }
+.sheet.busy form { opacity: .45; pointer-events: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.scan-warnings { margin: -4px 0 14px; padding: 8px 12px 8px 28px; border-radius: var(--radius-sm); background: color-mix(in srgb, #f59e0b 14%, transparent); font-size: .85rem; }
+.scan-warnings li + li { margin-top: 4px; }
 .sheet-head h2 { font-size: 1.1rem; font-weight: 600; }
 
 .amount-field { display: flex; align-items: center; gap: 8px; padding: 6px; border: 1px solid var(--border); border-radius: var(--radius); }

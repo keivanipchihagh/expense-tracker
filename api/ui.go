@@ -28,8 +28,9 @@ var webFS embed.FS
 // with Secure, Path=/ and no Domain, so subdomains can't set or replace it.
 const sessionCookieName = "et_session"
 
-// uiCsp allows only same-origin scripts and styles; nothing inline.
-const uiCsp = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
+// uiCsp allows only same-origin scripts and styles; nothing inline. blob:
+// images are the receipt photo previewed from the user's own device.
+const uiCsp = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; " +
 	"frame-ancestors 'none'; form-action 'self'; base-uri 'none'"
 
 // templateFuncs are available in every template.
@@ -167,9 +168,10 @@ func (s *Server) ResultsPartial(w http.ResponseWriter, r *http.Request) {
 // NewExpenseForm handles GET /ui/expenses/new.
 func (s *Server) NewExpenseForm(w http.ResponseWriter, r *http.Request) {
 	s.renderPartial(w, http.StatusOK, "form", formData{
-		Range:  filterFromQuery(r.URL.Query(), time.Now()),
-		Values: formValues{Category: string(models.CategoryFood)},
-		Symbol: s.currencySymbol(r),
+		Range:       filterFromQuery(r.URL.Query(), time.Now()),
+		Values:      formValues{Category: string(models.CategoryFood)},
+		Symbol:      s.currencySymbol(r),
+		ScanEnabled: s.handler.ScanEnabled(),
 	})
 }
 
@@ -242,7 +244,7 @@ func (s *Server) saveExpense(w http.ResponseWriter, r *http.Request, id string) 
 	}
 	if len(fieldErrors) > 0 {
 		// 200 so HTMX swaps the form back in with the errors.
-		s.renderPartial(w, http.StatusOK, "form", formData{Id: id, Range: rng, Values: values, Errors: fieldErrors, Symbol: s.currencySymbol(r)})
+		s.renderPartial(w, http.StatusOK, "form", formData{Id: id, Range: rng, Values: values, Errors: fieldErrors, Symbol: s.currencySymbol(r), ScanEnabled: id == "" && s.handler.ScanEnabled()})
 		return
 	}
 	s.renderSaved(w, r, rng)
@@ -736,6 +738,13 @@ type formData struct {
 	Errors map[string]string
 	// Symbol is the display currency's symbol, shown next to the amount.
 	Symbol string
+	// ScanEnabled shows the receipt scanner on a new expense. Scanned means
+	// the values were read off a receipt and need checking; ScanError and
+	// ScanWarnings say what went wrong or looks doubtful.
+	ScanEnabled  bool
+	Scanned      bool
+	ScanError    string
+	ScanWarnings []string
 }
 
 // Categories feeds the form's category select box.

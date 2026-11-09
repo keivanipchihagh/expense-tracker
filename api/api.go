@@ -94,6 +94,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /ui/expenses", s.requireSession(s.ResultsPartial))
 	mux.HandleFunc("GET /ui/expenses/new", s.requireSession(s.NewExpenseForm))
 	mux.HandleFunc("POST /ui/expenses", s.requireSession(s.CreateExpenseSubmit))
+	mux.HandleFunc("POST "+scanPath, s.requireSession(s.ScanReceiptSubmit))
 	mux.HandleFunc("GET /ui/expenses/{id}/edit", s.requireSession(s.EditExpenseForm))
 	mux.HandleFunc("POST /ui/expenses/{id}", s.requireSession(s.UpdateExpenseSubmit))
 	mux.HandleFunc("POST /ui/expenses/{id}/delete", s.requireSession(s.DeleteExpenseSubmit))

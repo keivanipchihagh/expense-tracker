@@ -45,6 +45,14 @@ type Config struct {
 	// AuthPassword as its password, and gets them. Unused otherwise.
 	OwnerEmail   string `envconfig:"OWNER_EMAIL"`
 	AuthPassword string `envconfig:"AUTH_PASSWORD"`
+
+	// OpenRouterApiKey turns on receipt scanning: photos are sent to
+	// OpenRouterModel to read. Empty leaves scanning off.
+	OpenRouterApiKey string `envconfig:"OPENROUTER_API_KEY"`
+	OpenRouterModel  string `envconfig:"OPENROUTER_MODEL" default:"nvidia/nemotron-3.5-super-vl:free"`
+	// OpenRouterBaseUrl is the API root; change it only for a proxy or a
+	// local stand-in.
+	OpenRouterBaseUrl string `envconfig:"OPENROUTER_BASE_URL" default:"https://openrouter.ai/api/v1"`
 }
 
 // NewConfig reads the service configuration from the environment and
