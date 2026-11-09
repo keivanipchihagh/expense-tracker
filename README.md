@@ -128,7 +128,7 @@ sqlite3 data/expense.db "SELECT action, before, after FROM logs WHERE expense_id
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/health` | Service status and version |
+| GET | `/health` | Service status (`{"status":"ok"}`); the version isn't exposed |
 | POST | `/api/v1/expenses` | Create an expense |
 | GET | `/api/v1/expenses?date_from=&date_to=&category=&merchant=` | List expenses, oldest first. All parameters are optional: dates are local (`YYYY-MM-DD`, inclusive), `category` matches exactly, `merchant` matches part of the name ignoring case |
 | GET | `/api/v1/expenses/{id}` | Get an expense |

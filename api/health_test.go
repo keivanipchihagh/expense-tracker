@@ -19,7 +19,7 @@ func TestHealth(t *testing.T) {
 			name:       "GET returns status and version",
 			method:     http.MethodGet,
 			wantStatus: http.StatusOK,
-			wantBody:   `{"status":"ok","version":"v1.2.3"}`,
+			wantBody:   `{"status":"ok"}`,
 		},
 		{
 			name:       "POST is not allowed",

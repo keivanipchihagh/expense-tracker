@@ -17,7 +17,7 @@ type Server struct {
 	secureCookies bool
 }
 
-// NewServer creates the API server. version is reported by /health;
+// NewServer creates the API server. version is reported to MCP clients;
 // publicUrl is the base URL used in OAuth metadata.
 func NewServer(handler *handler.Handler, version, publicUrl string) *Server {
 	if handler == nil {

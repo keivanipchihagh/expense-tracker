@@ -295,6 +295,16 @@ func TestOAuthFlow(t *testing.T) {
 	assert.Equal(t, "invalid_grant", oauthErr["error"], "a refresh token works only once")
 }
 
+func TestHealthHidesVersion(t *testing.T) {
+	s := newTestServer(t)
+	resp, err := http.Get(s.url + "/health")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.JSONEq(t, `{"status":"ok"}`, string(body))
+}
+
 func TestOAuthFlow_RefreshWithWrongClientDoesNotBurnToken(t *testing.T) {
 	s := newTestServer(t)
 	clientId := s.register(t)
