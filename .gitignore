@@ -35,3 +35,6 @@ go.work.sum
 # SQLite data (the folder itself is kept via data/.gitkeep)
 data/*
 !data/.gitkeep
+
+# Personal notes
+docs/IDEAS.md
