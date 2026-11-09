@@ -14,14 +14,11 @@
     <input type="hidden" name="merchant" value="{{.Range.Merchant}}">
     <input type="hidden" name="tz_offset" value="{{.Values.TzOffset}}">
 
-    <div class="amount-field {{if or (index .Errors "amount") (index .Errors "currency")}}invalid{{end}}">
-      <select name="currency" aria-label="Currency">
-        {{range .Currencies}}<option value="{{.Code}}" {{if eq .Code $.Values.Currency}}selected{{end}}>{{.Code}} ({{.Symbol}})</option>{{end}}
-      </select>
+    <div class="amount-field {{if index .Errors "amount"}}invalid{{end}}">
+      <span class="amount-symbol" aria-hidden="true">{{.Symbol}}</span>
       <input name="amount" inputmode="decimal" value="{{.Values.Amount}}" placeholder="0.00" aria-label="Amount" required autofocus>
     </div>
     {{with index .Errors "amount"}}<small class="field-error">{{.}}</small>{{end}}
-    {{with index .Errors "currency"}}<small class="field-error">{{.}}</small>{{end}}
 
     <div class="fields">
       <label class="{{if index .Errors "category"}}invalid{{end}}">

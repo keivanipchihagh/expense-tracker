@@ -88,8 +88,8 @@ func TestMcp_Tools(t *testing.T) {
 	for _, tool := range tools.Tools {
 		if tool.Name == "create_expense" {
 			schema, _ := json.Marshal(tool.InputSchema)
-			assert.Contains(t, string(schema), `"enum":["USD","EUR"]`, "the agent sees the allowed currencies")
-			assert.Contains(t, string(schema), `"required":["amount","currency","occurred_at","category"]`)
+			assert.NotContains(t, string(schema), "currency", "expenses have no currency")
+			assert.Contains(t, string(schema), `"required":["amount","occurred_at","category"]`)
 		}
 		if tool.Name == "delete_expense" {
 			require.NotNil(t, tool.Annotations.DestructiveHint)
@@ -104,7 +104,7 @@ func TestMcp_ExpenseLifecycle(t *testing.T) {
 
 	// Create
 	text, isErr := callTool(t, session, "create_expense", map[string]any{
-		"amount": "12.5", "currency": "EUR", "occurred_at": "2026-11-07T13:20:00+01:00",
+		"amount": "12.5", "occurred_at": "2026-11-07T13:20:00+01:00",
 		"category": "food", "merchant": "Rewe", "note": "lunch with the team",
 	})
 	require.False(t, isErr, text)
@@ -170,7 +170,8 @@ func TestMcp_ValidationErrorsAreReadable(t *testing.T) {
 	})
 	assert.True(t, isErr)
 	assert.Equal(t, "validation failed:\n"+
-		"- currency: must be one of USD, EUR\n"+
+		"- amount: must have at most 2 decimal places\n"+
+		"- currency: unknown field\n"+
 		"- occurred_at: must be an RFC 3339 timestamp with a UTC offset, e.g. 2026-11-07T13:20:00+01:00\n"+
 		"- tip: unknown field", text, "every problem is listed so the agent can fix its call in one go")
 

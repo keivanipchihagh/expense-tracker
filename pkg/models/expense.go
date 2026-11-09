@@ -6,21 +6,27 @@ import (
 	"time"
 )
 
-// Currency is an ISO 4217 currency code.
+// Currency is an ISO 4217 code. Expenses don't have one: amounts are plain
+// numbers, and the currency is only how the UI displays them.
 type Currency string
 
 const (
-	CurrencyUSD Currency = "USD"
 	CurrencyEUR Currency = "EUR"
+	CurrencyUSD Currency = "USD"
+	CurrencyGBP Currency = "GBP"
 )
 
-// Currencies lists the accepted currencies.
-var Currencies = []Currency{CurrencyUSD, CurrencyEUR}
+// Currencies lists the display currencies, in the order the UI offers them.
+var Currencies = []Currency{CurrencyEUR, CurrencyUSD, CurrencyGBP}
 
-// currencySymbols maps each accepted currency to its symbol.
+// DefaultCurrency is the display currency until the user picks one.
+const DefaultCurrency = CurrencyEUR
+
+// currencySymbols maps each display currency to its symbol.
 var currencySymbols = map[Currency]string{
-	CurrencyUSD: "$",
 	CurrencyEUR: "€",
+	CurrencyUSD: "$",
+	CurrencyGBP: "£",
 }
 
 // Symbol returns the currency's symbol, e.g. "€", or the code itself for a
@@ -68,9 +74,8 @@ const (
 // Expense is one logged expense. Optional fields are nil when unset.
 type Expense struct {
 	Id string `json:"id"`
-	// Amount is an exact decimal string with the currency's decimal places, e.g. "12.50".
-	Amount   string   `json:"amount"`
-	Currency Currency `json:"currency"`
+	// Amount is an exact decimal string with two decimal places, e.g. "12.50".
+	Amount string `json:"amount"`
 	// OccurredAt keeps the UTC offset it was recorded with.
 	OccurredAt time.Time `json:"occurred_at"`
 	Category   Category  `json:"category"`
@@ -83,11 +88,11 @@ type Expense struct {
 }
 
 func (e *Expense) String() string {
-	return fmt.Sprintf("Expense{Id: %s, Amount: %s %s, Category: %s, OccurredAt: %s}",
-		e.Id, e.Amount, e.Currency, e.Category, e.OccurredAt.Format(time.RFC3339))
+	return fmt.Sprintf("Expense{Id: %s, Amount: %s, Category: %s, OccurredAt: %s}",
+		e.Id, e.Amount, e.Category, e.OccurredAt.Format(time.RFC3339))
 }
 
-// IsValid reports whether c is an accepted currency.
+// IsValid reports whether c is a display currency.
 func (c Currency) IsValid() bool { return slices.Contains(Currencies, c) }
 
 // IsValid reports whether c is an accepted category.

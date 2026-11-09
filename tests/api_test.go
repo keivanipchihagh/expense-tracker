@@ -60,13 +60,15 @@ func newTestServer(t *testing.T) *testServer {
 	require.NoError(t, err)
 	sessionRepo, err := repositories.NewSessionRepository(ctx, db)
 	require.NoError(t, err)
+	settingRepo, err := repositories.NewSettingRepository(ctx, db)
+	require.NoError(t, err)
 
 	// The public URL is the test server's own address, known only once it runs.
 	var routes http.Handler
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { routes.ServeHTTP(w, r) }))
 	t.Cleanup(srv.Close)
 
-	h := handler.NewHandler(expenseRepo, oauthRepo, sessionRepo, srv.URL, password)
+	h := handler.NewHandler(expenseRepo, oauthRepo, sessionRepo, settingRepo, srv.URL, password)
 	routes = pkgHttp.NewHttpServer(api.NewServer(h, "test", srv.URL).Handler(), 5*time.Second, 1<<20).Handler
 
 	return &testServer{url: srv.URL, db: db}
@@ -360,11 +362,12 @@ func TestExpenseLifecycle(t *testing.T) {
 	// Create
 	var created map[string]any
 	status := s.call(t, http.MethodPost, "/api/v1/expenses",
-		`{"amount":12.5,"currency":"EUR","occurred_at":"2026-11-07T13:20:00+01:00","category":"food","merchant":"Rewe"}`,
+		`{"amount":12.5,"occurred_at":"2026-11-07T13:20:00+01:00","category":"food","merchant":"Rewe"}`,
 		&created)
 	require.Equal(t, http.StatusCreated, status)
 	id := created["id"].(string)
 	assert.Equal(t, "12.50", created["amount"], "a JSON number is stored exactly")
+	assert.NotContains(t, created, "currency", "expenses have no currency")
 
 	// Get
 	var fetched map[string]any
@@ -413,7 +416,8 @@ func TestValidationErrorsAreReported(t *testing.T) {
 
 	require.Equal(t, http.StatusUnprocessableEntity, status)
 	assert.Equal(t, "validation_failed", resp.Error.Code)
-	assert.Equal(t, "must have at most 2 decimal places for EUR", resp.Error.Fields["amount"])
+	assert.Equal(t, "must have at most 2 decimal places", resp.Error.Fields["amount"])
+	assert.Equal(t, "unknown field", resp.Error.Fields["currency"], "currency is no longer accepted")
 	assert.Contains(t, resp.Error.Fields["occurred_at"], "UTC offset")
 	assert.Contains(t, resp.Error.Fields["category"], "must be one of")
 	assert.Equal(t, "unknown field", resp.Error.Fields["tip"])

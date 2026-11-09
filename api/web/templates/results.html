@@ -39,25 +39,22 @@
   {{end}}
 </form>
 
-{{if .Totals}}
+{{with .Summary}}
 <section class="summary">
-  {{range .Totals}}
-  {{$symbol := .Symbol}}
-  <article class="summary-item" aria-label="{{.Currency}} total">
-    <p class="summary-label">Spent in {{.Currency}}</p>
-    <p class="summary-amount">{{.Symbol}}{{.Total}}</p>
+  <article class="summary-item" aria-label="Total">
+    <p class="summary-label">Spent</p>
+    <p class="summary-amount">{{$.Symbol}}{{.Total}}</p>
     <p class="muted small-text">{{.Count}} expense{{if ne .Count 1}}s{{end}}</p>
     <ul class="breakdown">
       {{range .Categories}}
       <li>
         <span class="cat">{{.Category}}</span>
         <meter class="bar" min="0" max="100" value="{{.Percent}}" aria-hidden="true"></meter>
-        <span class="num">{{$symbol}}{{.Total}}</span>
+        <span class="num">{{$.Symbol}}{{.Total}}</span>
       </li>
       {{end}}
     </ul>
   </article>
-  {{end}}
 </section>
 {{end}}
 
@@ -74,7 +71,7 @@
         <span class="row-meta"><span class="cat">{{.Category}}</span> · {{.Time}} <span class="offset">{{.Offset}}</span></span>
         {{if .Note}}<span class="row-note">{{.Note}}</span>{{end}}
       </div>
-      <span class="row-amount" title="{{.Currency}}">{{.Symbol}}{{.Amount}}</span>
+      <span class="row-amount">{{$.Symbol}}{{.Amount}}</span>
       <div class="row-actions">
         <button class="icon" aria-label="Edit" title="Edit"
                 hx-get="/ui/expenses/{{.Id}}/edit" hx-include="#range" hx-target="#editor">

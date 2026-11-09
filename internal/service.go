@@ -60,8 +60,13 @@ func Run() {
 		fatal("failed to initialize session repository", "error", err)
 	}
 
+	settingRepo, err := repositories.NewSettingRepository(ctx, db)
+	if err != nil {
+		fatal("failed to initialize setting repository", "error", err)
+	}
+
 	// Initialize handler and API
-	h := handler.NewHandler(expenseRepo, oauthRepo, sessionRepo, cfg.PublicUrl, cfg.AuthPassword)
+	h := handler.NewHandler(expenseRepo, oauthRepo, sessionRepo, settingRepo, cfg.PublicUrl, cfg.AuthPassword)
 	server := api.NewServer(h, cfg.AppVersion, cfg.PublicUrl)
 
 	// Start HTTP server: the API needs a bearer token, the UI a session

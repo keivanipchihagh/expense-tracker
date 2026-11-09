@@ -33,7 +33,8 @@ Open `PUBLIC_URL` (by default http://localhost:8000) and sign in with `AUTH_PASS
 
 - List expenses for a date range, with presets for this month, last month, this year and all time
 - Filter by category and merchant; the totals follow the filters
-- Totals per currency, with a breakdown by category
+- A total with a breakdown by category
+- Display currency (€, $ or £), picked next to **Add expense** and saved on the server. Amounts are plain numbers: switching changes the symbol only, nothing is converted
 - Add, edit and delete expenses; time and time zone default to your browser's
 - **Apps** page: see which apps (Claude, ChatGPT, …) are signed in through OAuth and revoke their access
 - Light/dark switch in the top bar; follows your system theme until you pick one (remembered in the browser)
@@ -91,7 +92,6 @@ One row per expense, in the `expenses` table.
 |---|---|---|
 | `id` | server | UUIDv7 |
 | `amount` | yes | Decimal string or number, > 0, at most 2 decimal places, e.g. `"12.50"` |
-| `currency` | yes | `USD` or `EUR` |
 | `occurred_at` | yes | RFC 3339 **with offset**, e.g. `2026-11-07T13:20:00+01:00`; the offset is kept |
 | `category` | yes | `food`, `groceries`, `transport`, `housing`, `utilities`, `health`, `entertainment`, `shopping`, `travel`, `subscriptions`, `education`, `gifts`, `other` |
 | `merchant` | no | Up to 200 characters |
@@ -111,6 +111,10 @@ One row per change to an expense, in the `logs` table. A log row is written in t
 | `before` | JSON snapshot of the expense before the change; null on create |
 | `after` | JSON snapshot of the expense after the change; null on delete |
 | `created_at` | UTC |
+
+### Setting
+
+The owner's preferences, in the `settings` table as `key`/`value` rows. Today there is one: `currency`, the display currency (`EUR`, `USD` or `GBP`; `EUR` until changed).
 
 ```bash
 docker compose -f deploy/docker-compose.yaml --env-file .env stop
@@ -132,7 +136,7 @@ sqlite3 data/expense.db "SELECT action, before, after FROM logs WHERE expense_id
 
 ```bash
 curl -X POST localhost:8000/api/v1/expenses -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"amount":"12.50","currency":"EUR","occurred_at":"2026-11-07T13:20:00+01:00","category":"food","merchant":"Rewe"}'
+  -d '{"amount":"12.50","occurred_at":"2026-11-07T13:20:00+01:00","category":"food","merchant":"Rewe"}'
 ```
 
 Errors look like `{"error":{"code":"validation_failed","message":"...","fields":{"amount":"must be greater than zero"}}}`.

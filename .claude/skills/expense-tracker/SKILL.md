@@ -25,7 +25,7 @@ claude mcp remove expense-tracker                                         # remo
 | Tool | Use |
 |---|---|
 | `create_expense` | Record an expense |
-| `list_expenses` | `date_from` / `date_to` (YYYY-MM-DD, local, inclusive, optional) |
+| `list_expenses` | `date_from` / `date_to` (YYYY-MM-DD, local, inclusive), `category`, `merchant` (part of the name); all optional |
 | `get_expense` | One expense by `id` |
 | `update_expense` | `id` + only the fields that change; `null` clears `merchant` or `note` |
 | `delete_expense` | Permanent; confirm with the user unless they clearly asked |
@@ -33,7 +33,7 @@ claude mcp remove expense-tracker                                         # remo
 ## Filling in an expense
 
 - `amount`: string, positive, at most 2 decimals, e.g. `"12.50"`. Ask if missing; never guess.
-- `currency`: `USD` or `EUR`. Ask if unclear and there's no obvious default from the conversation.
+- There is no currency field. Amounts are plain numbers, and the user picks one display currency in the web UI. If they mention a different currency than usual, ask before logging.
 - `occurred_at`: RFC 3339 **with the user's UTC offset**, e.g. `2026-11-07T13:20:00+01:00`. "Now" or no time given means the current local time. "Yesterday at lunch" means yesterday around 12:30. Never send a time without an offset.
 - `category`: one of `food` (eating out), `groceries`, `transport`, `housing`, `utilities`, `health`, `entertainment`, `shopping`, `travel`, `subscriptions`, `education`, `gifts`, `other`.
 - `merchant`: the store or vendor if named, e.g. "Rewe".
@@ -41,10 +41,10 @@ claude mcp remove expense-tracker                                         # remo
 
 ## Common tasks
 
-- **Log**: one `create_expense` per expense. Confirm briefly afterwards, e.g. "Logged €12.50 groceries at Rewe today".
+- **Log**: one `create_expense` per expense. Confirm briefly afterwards, e.g. "Logged 12.50 groceries at Rewe today".
 - **Fix**: find the expense with `list_expenses` for its date, then `update_expense` with only the changed fields. If several match, ask which one.
 - **Delete**: same lookup, confirm, then `delete_expense`.
-- **How much did I spend**: `list_expenses` for the range, then sum `amount` per currency yourself with exact decimal arithmetic. Never add USD and EUR together. Group by `category` when asked for a breakdown.
+- **How much did I spend**: `list_expenses` for the range, then sum `amount` yourself with exact decimal arithmetic. Filter by `category` or `merchant` when the question names one. Group by `category` when asked for a breakdown.
 
 ## Errors
 

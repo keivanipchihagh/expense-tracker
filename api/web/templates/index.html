@@ -3,10 +3,17 @@
 {{define "content"}}
 <div class="page-head">
   <h1>Expenses</h1>
-  <button class="primary" hx-get="/ui/expenses/new" hx-include="#range" hx-target="#editor">
-    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-    Add expense
-  </button>
+  <div class="page-actions">
+    <form class="currency-picker" method="post" action="/ui/currency" hx-post="/ui/currency" hx-trigger="change">
+      <select name="currency" aria-label="Display currency" title="Display currency">
+        {{range .Results.CurrencyOptions}}<option value="{{.Code}}" {{if .Selected}}selected{{end}}>{{.Symbol}} {{.Code}}</option>{{end}}
+      </select>
+    </form>
+    <button class="primary" hx-get="/ui/expenses/new" hx-include="#range" hx-target="#editor">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+      Add expense
+    </button>
+  </div>
 </div>
 
 <div id="editor"></div>

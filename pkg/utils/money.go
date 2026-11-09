@@ -3,23 +3,23 @@ package utils
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/shopspring/decimal"
-	"golang.org/x/text/currency"
 )
+
+// AmountDecimals is the number of decimal places amounts are stored with.
+const AmountDecimals = 2
 
 // maxAmount is the exclusive upper bound for an amount.
 var maxAmount = decimal.New(1, 15)
 
 var errAmountFormat = errors.New(`must be a decimal number or string, e.g. "12.50"`)
 
-// ParseAmount validates an amount for the given ISO 4217 currency and
-// returns it with exactly the currency's number of decimal places, e.g.
-// 12.5 EUR → "12.50", 1200 JPY → "1200". v must be a string or json.Number;
-// floats are rejected so amounts stay exact.
-func ParseAmount(v any, currencyCode string) (string, error) {
+// ParseAmount validates an amount and returns it with exactly two decimal
+// places, e.g. 12.5 → "12.50". v must be a string or json.Number; floats are
+// rejected so amounts stay exact.
+func ParseAmount(v any) (string, error) {
 	var raw string
 	switch a := v.(type) {
 	case string:
@@ -40,24 +40,8 @@ func ParseAmount(v any, currencyCode string) (string, error) {
 	if d.GreaterThanOrEqual(maxAmount) {
 		return "", errors.New("is too large")
 	}
-
-	scale, err := CurrencyScale(currencyCode)
-	if err != nil {
-		return "", err
+	if !d.Equal(d.Truncate(AmountDecimals)) {
+		return "", errors.New("must have at most 2 decimal places")
 	}
-	if !d.Equal(d.Truncate(scale)) {
-		return "", fmt.Errorf("must have at most %d decimal places for %s", scale, currencyCode)
-	}
-	return d.StringFixed(scale), nil
-}
-
-// CurrencyScale returns the number of decimal places ISO 4217 defines for
-// the currency, e.g. 2 for EUR and 0 for JPY.
-func CurrencyScale(currencyCode string) (int32, error) {
-	unit, err := currency.ParseISO(currencyCode)
-	if err != nil {
-		return 0, fmt.Errorf("unknown currency %q", currencyCode)
-	}
-	scale, _ := currency.Standard.Rounding(unit)
-	return int32(scale), nil
+	return d.StringFixed(AmountDecimals), nil
 }

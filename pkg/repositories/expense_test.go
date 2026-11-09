@@ -40,7 +40,6 @@ func newExpense(id, occurredAt string) models.Expense {
 	return models.Expense{
 		Id:         id,
 		Amount:     "12.50",
-		Currency:   models.CurrencyEUR,
 		OccurredAt: t,
 		Category:   models.CategoryFood,
 		CreatedAt:  created,
@@ -333,4 +332,79 @@ func TestExpenseRepository_CreateWritesLog(t *testing.T) {
 
 	want, _ := json.Marshal(e)
 	assert.JSONEq(t, string(want), logs[0].after.String)
+}
+
+func TestExpenseRepository_DropsCurrencyColumn(t *testing.T) {
+	client := newTestClient(t)
+	ctx := context.Background()
+
+	// A database from before amounts lost their currency.
+	_, err := client.ExecContext(ctx, `
+		CREATE TABLE expenses (
+			id          TEXT     PRIMARY KEY,
+			amount      TEXT     NOT NULL,
+			currency    TEXT     NOT NULL,
+			occurred_at DATETIME NOT NULL,
+			category    TEXT     NOT NULL,
+			merchant    TEXT,
+			note        TEXT,
+			created_at  DATETIME NOT NULL,
+			updated_at  DATETIME NOT NULL
+		)`)
+	require.NoError(t, err)
+	_, err = client.ExecContext(ctx, `
+		INSERT INTO expenses VALUES
+			('eur', '12.50', 'EUR', '2026-11-07T13:20:00+01:00', 'food', 'Rewe', NULL, '2026-11-07T12:21:00Z', '2026-11-07T12:21:00Z'),
+			('usd', '7.25', 'USD', '2026-11-08T09:00:00-05:00', 'transport', NULL, 'cab', '2026-11-08T14:00:00Z', '2026-11-08T14:00:00Z')`)
+	require.NoError(t, err)
+
+	logRepo, err := NewLogRepository(ctx, client)
+	require.NoError(t, err)
+	repo, err := NewExpenseRepository(ctx, client, logRepo)
+	require.NoError(t, err)
+
+	columns := func() []string {
+		rows, err := client.QueryContext(ctx, "SELECT name FROM pragma_table_info('expenses') ORDER BY cid")
+		require.NoError(t, err)
+		defer rows.Close()
+		var out []string
+		for rows.Next() {
+			var name string
+			require.NoError(t, rows.Scan(&name))
+			out = append(out, name)
+		}
+		require.NoError(t, rows.Err())
+		return out
+	}
+	assert.Equal(t, []string{"id", "amount", "occurred_at", "category", "merchant", "note", "created_at", "updated_at"}, columns())
+
+	// Every row survives with its amount unchanged.
+	got, err := repo.List(ctx, models.ExpenseFilter{})
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.Equal(t, "eur", got[0].Id)
+	assert.Equal(t, "12.50", got[0].Amount)
+	assert.Equal(t, "Rewe", *got[0].Merchant)
+	assert.Equal(t, "usd", got[1].Id)
+	assert.Equal(t, "7.25", got[1].Amount)
+	assert.Equal(t, "cab", *got[1].Note)
+
+	// Writes work on the migrated table, and running the migration again is a no-op.
+	require.NoError(t, repo.Create(ctx, newExpense("new", "2026-11-09T10:00:00+01:00")))
+	_, err = NewExpenseRepository(ctx, client, logRepo)
+	require.NoError(t, err)
+	got, err = repo.List(ctx, models.ExpenseFilter{})
+	require.NoError(t, err)
+	assert.Len(t, got, 3)
+}
+
+func TestExpenseRepository_SnapshotsHaveNoCurrency(t *testing.T) {
+	repo, client := newTestExpenseRepo(t)
+	ctx := context.Background()
+	require.NoError(t, repo.Create(ctx, newExpense("e1", "2026-11-07T13:20:00+01:00")))
+
+	var after string
+	require.NoError(t, client.QueryRowContext(ctx, `SELECT "after" FROM logs WHERE expense_id = 'e1'`).Scan(&after))
+	assert.NotContains(t, after, "currency")
+	assert.Contains(t, after, `"amount":"12.50"`)
 }

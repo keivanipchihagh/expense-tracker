@@ -22,7 +22,6 @@ var errDatabase = errors.New("database is on fire")
 func validInput() map[string]any {
 	return map[string]any{
 		"amount":      json.Number("12.5"),
-		"currency":    "EUR",
 		"occurred_at": "2026-11-07T13:20:00+01:00",
 		"category":    "food",
 	}
@@ -34,7 +33,6 @@ func storedExpense() models.Expense {
 	return models.Expense{
 		Id:         "0193f2a1-0000-7000-8000-000000000001",
 		Amount:     "12.50",
-		Currency:   models.CurrencyEUR,
 		OccurredAt: time.Date(2026, 11, 7, 13, 20, 0, 0, time.FixedZone("", 3600)),
 		Category:   models.CategoryFood,
 		Merchant:   &merchant,
@@ -71,8 +69,7 @@ func TestCreateExpense_Success(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, uuid.Version(7), id.Version())
 
-	assert.Equal(t, "12.50", got.Amount, "amount is canonicalized to the currency's decimals")
-	assert.Equal(t, models.CurrencyEUR, got.Currency)
+	assert.Equal(t, "12.50", got.Amount, "amount is canonicalized to two decimals")
 	assert.Equal(t, "2026-11-07T13:20:00+01:00", got.OccurredAt.Format(time.RFC3339), "offset is kept")
 	assert.Equal(t, models.CategoryFood, got.Category)
 	assert.Equal(t, "Rewe", *got.Merchant, "text is trimmed")
@@ -105,23 +102,16 @@ func TestCreateExpense_Validation(t *testing.T) {
 			name:   "all required fields missing",
 			modify: func(in map[string]any) { clear(in) },
 			want: map[string]string{
-				"amount": "is required", "currency": "is required",
-				"occurred_at": "is required", "category": "is required",
+				"amount": "is required", "occurred_at": "is required", "category": "is required",
 			},
 		},
 		{name: "required field null", modify: func(in map[string]any) { in["category"] = nil }, want: map[string]string{"category": "is required"}},
 		{name: "unknown field", modify: func(in map[string]any) { in["tip"] = "2" }, want: map[string]string{"tip": "unknown field"}},
 		{name: "server-set field", modify: func(in map[string]any) { in["id"] = "x" }, want: map[string]string{"id": "unknown field"}},
-		{name: "unsupported currency", modify: func(in map[string]any) { in["currency"] = "GBP" }, want: map[string]string{"currency": "must be one of USD, EUR"}},
-		{name: "currency not a string", modify: func(in map[string]any) { in["currency"] = json.Number("1") }, want: map[string]string{"currency": "must be one of USD, EUR"}},
-		{name: "too many decimals", modify: func(in map[string]any) { in["amount"] = "1.234" }, want: map[string]string{"amount": "must have at most 2 decimal places for EUR"}},
+		{name: "currency is no longer a field", modify: func(in map[string]any) { in["currency"] = "EUR" }, want: map[string]string{"currency": "unknown field"}},
+		{name: "too many decimals", modify: func(in map[string]any) { in["amount"] = "1.234" }, want: map[string]string{"amount": "must have at most 2 decimal places"}},
 		{name: "negative amount", modify: func(in map[string]any) { in["amount"] = json.Number("-3") }, want: map[string]string{"amount": "must be greater than zero"}},
 		{name: "amount not a number", modify: func(in map[string]any) { in["amount"] = true }, want: map[string]string{"amount": `must be a decimal number or string, e.g. "12.50"`}},
-		{
-			name:   "amount is not checked while currency is invalid",
-			modify: func(in map[string]any) { in["currency"] = "GBP"; in["amount"] = "1.234" },
-			want:   map[string]string{"currency": "must be one of USD, EUR"},
-		},
 		{name: "naive timestamp", modify: func(in map[string]any) { in["occurred_at"] = "2026-11-07T13:20:00" }, want: map[string]string{"occurred_at": "must be an RFC 3339 timestamp with a UTC offset, e.g. 2026-11-07T13:20:00+01:00"}},
 		{name: "timestamp not a string", modify: func(in map[string]any) { in["occurred_at"] = json.Number("1") }, want: map[string]string{"occurred_at": "must be an RFC 3339 timestamp with a UTC offset, e.g. 2026-11-07T13:20:00+01:00"}},
 		{name: "unknown category", modify: func(in map[string]any) { in["category"] = "rent" }, want: map[string]string{"category": "must be one of " + joinValues(models.Categories)}},
@@ -264,14 +254,6 @@ func TestUpdateExpense_Success(t *testing.T) {
 			},
 		},
 		{
-			name:  "currency change re-checks the existing amount",
-			patch: map[string]any{"currency": "USD"},
-			verify: func(t *testing.T, before, after models.Expense) {
-				assert.Equal(t, models.CurrencyUSD, after.Currency)
-				assert.Equal(t, before.Amount, after.Amount)
-			},
-		},
-		{
 			name:  "new occurred_at keeps its own offset",
 			patch: map[string]any{"occurred_at": "2026-11-08T09:00:00-05:00"},
 			verify: func(t *testing.T, _, after models.Expense) {
@@ -333,7 +315,8 @@ func TestUpdateExpense_Validation(t *testing.T) {
 		{name: "required field cannot be cleared", patch: map[string]any{"amount": nil, "category": nil}, want: map[string]string{"amount": "is required", "category": "is required"}},
 		{name: "unknown field", patch: map[string]any{"created_at": "2026-01-01T00:00:00Z"}, want: map[string]string{"created_at": "unknown field"}},
 		{name: "invalid category", patch: map[string]any{"category": "rent"}, want: map[string]string{"category": "must be one of " + joinValues(models.Categories)}},
-		{name: "new amount checked against stored currency", patch: map[string]any{"amount": "1.234"}, want: map[string]string{"amount": "must have at most 2 decimal places for EUR"}},
+		{name: "new amount has at most two decimals", patch: map[string]any{"amount": "1.234"}, want: map[string]string{"amount": "must have at most 2 decimal places"}},
+		{name: "currency is no longer a field", patch: map[string]any{"currency": "USD"}, want: map[string]string{"currency": "unknown field"}},
 	}
 
 	for _, tt := range tests {

@@ -21,8 +21,7 @@ import (
 // decide how to fill in the tool arguments.
 const mcpInstructions = `Expense log for one person. Use these tools to record, correct, look up and delete their expenses.
 
-- amount: decimal string with at most 2 decimals, e.g. "12.50". Always positive.
-- currency: USD or EUR. If the user doesn't say, ask or use the currency they usually use.
+- amount: decimal string with at most 2 decimals, e.g. "12.50". Always positive. Amounts have no currency: the user picks one display currency in the web UI. If the user names a different currency, ask before logging.
 - occurred_at: RFC 3339 timestamp WITH the user's UTC offset, e.g. "2026-11-07T13:20:00+01:00". If the user doesn't say when, use the current time in their time zone.
 - category: pick the closest of the allowed values; use "other" if nothing fits.
 - merchant: the store or vendor, if known.
@@ -43,7 +42,7 @@ func (s *Server) NewMcpHandler() http.Handler {
 	server.AddTool(&mcp.Tool{
 		Name:        "create_expense",
 		Description: "Record a new expense. Returns the stored expense, including its id.",
-		InputSchema: objectSchema(expenseProperties(), "amount", "currency", "occurred_at", "category"),
+		InputSchema: objectSchema(expenseProperties(), "amount", "occurred_at", "category"),
 		Annotations: &mcp.ToolAnnotations{Title: "Create expense"},
 	}, s.mcpCreateExpense)
 
@@ -296,11 +295,6 @@ func expenseProperties() map[string]any {
 			"type":        "string",
 			"pattern":     `^\d+(\.\d{1,2})?$`,
 			"description": `Positive decimal amount with at most 2 decimals, e.g. "12.50".`,
-		},
-		"currency": map[string]any{
-			"type":        "string",
-			"enum":        toStrings(models.Currencies),
-			"description": "ISO 4217 currency code.",
 		},
 		"occurred_at": map[string]any{
 			"type":        "string",

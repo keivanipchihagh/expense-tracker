@@ -12,6 +12,7 @@ type Handler struct {
 	expenseRepo repositories.ExpenseRepository
 	oauthRepo   repositories.OAuthRepository
 	sessionRepo repositories.SessionRepository
+	settingRepo repositories.SettingRepository
 	// publicUrl is the server's base URL, used as the OAuth issuer.
 	publicUrl string
 	// password unlocks the OAuth login page and the UI.
@@ -27,9 +28,10 @@ func NewHandler(
 	expenseRepo repositories.ExpenseRepository,
 	oauthRepo repositories.OAuthRepository,
 	sessionRepo repositories.SessionRepository,
+	settingRepo repositories.SettingRepository,
 	publicUrl, password string,
 ) *Handler {
-	if expenseRepo == nil || oauthRepo == nil || sessionRepo == nil {
+	if expenseRepo == nil || oauthRepo == nil || sessionRepo == nil || settingRepo == nil {
 		panic("handler: repositories must not be nil")
 	}
 	if publicUrl == "" || password == "" {
@@ -39,6 +41,7 @@ func NewHandler(
 		expenseRepo:   expenseRepo,
 		oauthRepo:     oauthRepo,
 		sessionRepo:   sessionRepo,
+		settingRepo:   settingRepo,
 		publicUrl:     strings.TrimSuffix(publicUrl, "/"),
 		password:      password,
 		logins:        newRateLimiter(maxFailedLogins, failedLoginWindow),

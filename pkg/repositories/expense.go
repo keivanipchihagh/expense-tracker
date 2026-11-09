@@ -46,7 +46,6 @@ const expenseTableSchema = `
 	CREATE TABLE IF NOT EXISTS expenses (
 		id             TEXT     PRIMARY KEY,
 		amount         TEXT     NOT NULL,
-		currency       TEXT     NOT NULL,
 		occurred_at    DATETIME NOT NULL,
 		category       TEXT     NOT NULL,
 		merchant       TEXT,
@@ -61,13 +60,13 @@ const expenseIndexSchema = `CREATE INDEX IF NOT EXISTS expenses_occurred_at ON e
 // expenseSelect reads every column. Timestamps are cast to TEXT so the driver
 // returns them exactly as stored instead of converting them to time.Time.
 const expenseSelect = `
-	SELECT id, amount, currency, CAST(occurred_at AS TEXT), category, merchant, note,
+	SELECT id, amount, CAST(occurred_at AS TEXT), category, merchant, note,
 	       CAST(created_at AS TEXT), CAST(updated_at AS TEXT)
 	FROM expenses
 `
 
 // NewExpenseRepository creates the expenses table and its index if they do
-// not exist.
+// not exist, and migrates older databases.
 func NewExpenseRepository(ctx context.Context, client *sqlite.Client, logRepo LogRepository) (ExpenseRepository, error) {
 	if client == nil || logRepo == nil {
 		panic("expense repository: client and log repository must not be nil")
@@ -77,7 +76,29 @@ func NewExpenseRepository(ctx context.Context, client *sqlite.Client, logRepo Lo
 			return nil, fmt.Errorf("create expenses table: %w", err)
 		}
 	}
+	if err := dropCurrencyColumn(ctx, client); err != nil {
+		return nil, err
+	}
 	return &ExpenseRepositoryImpl{client: client, logRepo: logRepo}, nil
+}
+
+// dropCurrencyColumn removes the currency column from databases created
+// before amounts lost their currency. Amounts are kept as they are.
+func dropCurrencyColumn(ctx context.Context, client *sqlite.Client) error {
+	var n int
+	err := client.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM pragma_table_info('expenses') WHERE name = 'currency'",
+	).Scan(&n)
+	if err != nil {
+		return fmt.Errorf("inspect expenses table: %w", err)
+	}
+	if n == 0 {
+		return nil
+	}
+	if _, err := client.ExecContext(ctx, "ALTER TABLE expenses DROP COLUMN currency"); err != nil {
+		return fmt.Errorf("drop currency column: %w", err)
+	}
+	return nil
 }
 
 func (r *ExpenseRepositoryImpl) Create(ctx context.Context, expense models.Expense) error {
@@ -87,15 +108,14 @@ func (r *ExpenseRepositoryImpl) Create(ctx context.Context, expense models.Expen
 	}
 
 	query := `
-		INSERT INTO expenses (id, amount, currency, occurred_at, category, merchant, note,
+		INSERT INTO expenses (id, amount, occurred_at, category, merchant, note,
 		                      created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	return r.client.WithTx(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, query,
 			expense.Id,
 			expense.Amount,
-			string(expense.Currency),
 			formatTime(expense.OccurredAt),
 			string(expense.Category),
 			expense.Merchant,
@@ -169,7 +189,7 @@ func (r *ExpenseRepositoryImpl) Update(ctx context.Context, expense models.Expen
 
 	query := `
 		UPDATE expenses
-		SET amount = ?, currency = ?, occurred_at = ?, category = ?, merchant = ?,
+		SET amount = ?, occurred_at = ?, category = ?, merchant = ?,
 		    note = ?, updated_at = ?
 		WHERE id = ?
 	`
@@ -185,7 +205,6 @@ func (r *ExpenseRepositoryImpl) Update(ctx context.Context, expense models.Expen
 
 		_, err = tx.ExecContext(ctx, query,
 			expense.Amount,
-			string(expense.Currency),
 			formatTime(expense.OccurredAt),
 			string(expense.Category),
 			expense.Merchant,
@@ -234,11 +253,11 @@ type scanner interface {
 func scanExpense(s scanner) (models.Expense, error) {
 	var (
 		e                                models.Expense
-		currency, category               string
+		category                         string
 		occurredAt, createdAt, updatedAt string
 		merchant, note                   sql.NullString
 	)
-	err := s.Scan(&e.Id, &e.Amount, &currency, &occurredAt, &category,
+	err := s.Scan(&e.Id, &e.Amount, &occurredAt, &category,
 		&merchant, &note, &createdAt, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return models.Expense{}, err
@@ -247,7 +266,6 @@ func scanExpense(s scanner) (models.Expense, error) {
 		return models.Expense{}, fmt.Errorf("scan expense: %w", err)
 	}
 
-	e.Currency = models.Currency(currency)
 	e.Category = models.Category(category)
 	e.Merchant = nullableString(merchant)
 	e.Note = nullableString(note)

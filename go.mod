@@ -10,7 +10,6 @@ require (
 	github.com/stretchr/testify v1.12.1
 	go.uber.org/goleak v1.3.0
 	go.uber.org/mock v0.6.0
-	golang.org/x/text v0.43.0
 	modernc.org/sqlite v1.62.0
 )
 

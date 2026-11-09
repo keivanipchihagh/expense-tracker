@@ -19,11 +19,11 @@ import (
 )
 
 // requiredFields must be present and non-null on create and cannot be cleared.
-var requiredFields = []string{"amount", "currency", "occurred_at", "category"}
+var requiredFields = []string{"amount", "occurred_at", "category"}
 
 // writableFields are the keys a client may send.
 var writableFields = map[string]bool{
-	"amount": true, "currency": true, "occurred_at": true, "category": true,
+	"amount": true, "occurred_at": true, "category": true,
 	"merchant": true, "note": true,
 }
 
@@ -149,23 +149,12 @@ func applyInput(e *models.Expense, input map[string]any, errs map[string]string)
 		}
 	}
 
-	previousCurrency := e.Currency
-	if v := input["currency"]; v != nil {
-		s, _ := v.(string)
-		if c := models.Currency(s); c.IsValid() {
-			e.Currency = c
+	if v := input["amount"]; v != nil {
+		amount, err := utils.ParseAmount(v)
+		if err != nil {
+			errs["amount"] = err.Error()
 		} else {
-			errs["currency"] = "must be one of " + joinValues(models.Currencies)
-		}
-	}
-
-	// The amount's allowed decimal places depend on the currency, so it is
-	// checked after the currency and re-checked when only the currency changed.
-	if _, bad := errs["currency"]; !bad {
-		if v := input["amount"]; v != nil {
-			setAmount(e, v, errs)
-		} else if e.Amount != "" && e.Currency != previousCurrency {
-			setAmount(e, e.Amount, errs)
+			e.Amount = amount
 		}
 	}
 
@@ -190,15 +179,6 @@ func applyInput(e *models.Expense, input map[string]any, errs map[string]string)
 
 	applyText(input, "merchant", models.MaxMerchantLength, &e.Merchant, errs)
 	applyText(input, "note", models.MaxNoteLength, &e.Note, errs)
-}
-
-func setAmount(e *models.Expense, v any, errs map[string]string) {
-	amount, err := utils.ParseAmount(v, string(e.Currency))
-	if err != nil {
-		errs["amount"] = err.Error()
-		return
-	}
-	e.Amount = amount
 }
 
 // applyText sets an optional text field: null or a blank string clears it.

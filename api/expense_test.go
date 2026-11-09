@@ -17,14 +17,13 @@ import (
 	"go.uber.org/mock/gomock"
 )
 
-const validBody = `{"amount":"12.50","currency":"EUR","occurred_at":"2026-11-07T13:20:00+01:00","category":"food"}`
+const validBody = `{"amount":"12.50","occurred_at":"2026-11-07T13:20:00+01:00","category":"food"}`
 
 func sampleExpense() models.Expense {
 	ts := time.Date(2026, 11, 7, 12, 21, 0, 0, time.UTC)
 	return models.Expense{
 		Id:         "e1",
 		Amount:     "12.50",
-		Currency:   models.CurrencyEUR,
 		OccurredAt: time.Date(2026, 11, 7, 13, 20, 0, 0, time.FixedZone("", 3600)),
 		Category:   models.CategoryFood,
 		CreatedAt:  ts,
@@ -65,11 +64,15 @@ func TestCreateExpense_Endpoint(t *testing.T) {
 	t.Run("validation error", func(t *testing.T) {
 		routes, _ := newTestRoutes(t)
 
-		rec := do(routes, http.MethodPost, "/api/v1/expenses", `{"amount":"12.50"}`)
+		rec := do(routes, http.MethodPost, "/api/v1/expenses", `{"amount":"12.50","currency":"EUR"}`)
 		require.Equal(t, http.StatusUnprocessableEntity, rec.Code)
 		e := decodeError(t, rec)
 		assert.Equal(t, "validation_failed", e.Code)
-		assert.Equal(t, "is required", e.Fields["currency"])
+		assert.Equal(t, map[string]string{
+			"currency":    "unknown field",
+			"occurred_at": "is required",
+			"category":    "is required",
+		}, e.Fields, "currency is no longer accepted")
 	})
 
 	t.Run("repository error is a generic 500", func(t *testing.T) {

@@ -151,7 +151,8 @@ func (s *Server) ResultsPartial(w http.ResponseWriter, r *http.Request) {
 func (s *Server) NewExpenseForm(w http.ResponseWriter, r *http.Request) {
 	s.renderPartial(w, http.StatusOK, "form", formData{
 		Range:  filterFromQuery(r.URL.Query(), time.Now()),
-		Values: formValues{Currency: string(models.CurrencyEUR), Category: string(models.CategoryFood)},
+		Values: formValues{Category: string(models.CategoryFood)},
+		Symbol: s.currencySymbol(r),
 	})
 }
 
@@ -166,6 +167,7 @@ func (s *Server) EditExpenseForm(w http.ResponseWriter, r *http.Request) {
 		Id:     e.Id,
 		Range:  filterFromQuery(r.URL.Query(), time.Now()),
 		Values: formValuesFrom(e),
+		Symbol: s.currencySymbol(r),
 	})
 }
 
@@ -223,10 +225,39 @@ func (s *Server) saveExpense(w http.ResponseWriter, r *http.Request, id string) 
 	}
 	if len(fieldErrors) > 0 {
 		// 200 so HTMX swaps the form back in with the errors.
-		s.renderPartial(w, http.StatusOK, "form", formData{Id: id, Range: rng, Values: values, Errors: fieldErrors})
+		s.renderPartial(w, http.StatusOK, "form", formData{Id: id, Range: rng, Values: values, Errors: fieldErrors, Symbol: s.currencySymbol(r)})
 		return
 	}
 	s.renderSaved(w, r, rng)
+}
+
+// SetCurrencySubmit handles POST /ui/currency: it changes the display
+// currency and reloads the page so every amount shows the new symbol.
+func (s *Server) SetCurrencySubmit(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad form", http.StatusBadRequest)
+		return
+	}
+	if err := s.handler.SetDisplayCurrency(r.Context(), models.Currency(r.PostForm.Get("currency"))); err != nil {
+		s.renderUiError(w, r, err)
+		return
+	}
+	if r.Header.Get("HX-Request") == "true" {
+		w.Header().Set("HX-Refresh", "true")
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+// currencySymbol is the display currency's symbol for forms. It falls back
+// to the default currency if the setting can't be read (already logged).
+func (s *Server) currencySymbol(r *http.Request) string {
+	c, err := s.handler.DisplayCurrency(r.Context())
+	if err != nil {
+		return models.DefaultCurrency.Symbol()
+	}
+	return c.Symbol()
 }
 
 // renderSaved closes the editor and refreshes the results in one response.
@@ -320,7 +351,11 @@ func (s *Server) results(r *http.Request, filter listFilter) (resultsData, error
 	if err != nil {
 		return resultsData{}, err
 	}
-	results := buildResults(filter.dateRange, expenses)
+	currency, err := s.handler.DisplayCurrency(r.Context())
+	if err != nil {
+		return resultsData{}, err
+	}
+	results := buildResults(filter.dateRange, expenses, currency)
 	results.Filter = filter
 	results.Presets = presets(time.Now(), filter.dateRange)
 	for i := range results.Presets {
@@ -538,7 +573,11 @@ type resultsData struct {
 	Presets []preset
 	Rows    []expenseRow
 	Days    []dayGroup
-	Totals  []currencyTotal
+	// Summary is nil when there are no expenses.
+	Summary *summaryTotal
+	// Currency is the display currency; Symbol is its symbol, e.g. "€".
+	Currency models.Currency
+	Symbol   string
 }
 
 // dayGroup is the expenses of one local date, newest first.
@@ -548,12 +587,10 @@ type dayGroup struct {
 }
 
 type expenseRow struct {
-	Id, Date, Time, Offset, Amount, Currency, Symbol, Category, Merchant, Note string
+	Id, Date, Time, Offset, Amount, Category, Merchant, Note string
 }
 
-type currencyTotal struct {
-	Currency   string
-	Symbol     string
+type summaryTotal struct {
 	Total      string
 	Count      int
 	Categories []categoryTotal
@@ -565,19 +602,14 @@ type categoryTotal struct {
 	Percent  int
 }
 
-// buildResults turns expenses (oldest first) into rows (newest first) and
-// per-currency totals with a category breakdown, largest category first.
-// Sums use exact decimals; different currencies are never added together.
-func buildResults(rng dateRange, expenses []models.Expense) resultsData {
-	out := resultsData{Range: rng}
+// buildResults turns expenses (oldest first) into rows (newest first) and a
+// total with a category breakdown, largest category first. Sums use exact
+// decimals. currency is only used for display; nothing is converted.
+func buildResults(rng dateRange, expenses []models.Expense, currency models.Currency) resultsData {
+	out := resultsData{Range: rng, Currency: currency, Symbol: currency.Symbol()}
 
-	type sums struct {
-		total      decimal.Decimal
-		count      int
-		categories map[string]decimal.Decimal
-	}
-	byCurrency := map[string]*sums{}
-
+	var total decimal.Decimal
+	categories := map[string]decimal.Decimal{}
 	for _, e := range slices.Backward(expenses) {
 		row := expenseRow{
 			Id:       e.Id,
@@ -585,8 +617,6 @@ func buildResults(rng dateRange, expenses []models.Expense) resultsData {
 			Time:     e.OccurredAt.Format("15:04"),
 			Offset:   e.OccurredAt.Format("-07:00"),
 			Amount:   e.Amount,
-			Currency: string(e.Currency),
-			Symbol:   e.Currency.Symbol(),
 			Category: string(e.Category),
 			Merchant: deref(e.Merchant),
 			Note:     deref(e.Note),
@@ -603,39 +633,30 @@ func buildResults(rng dateRange, expenses []models.Expense) resultsData {
 		if err != nil {
 			continue // stored amounts are validated; skip anything unreadable
 		}
-		cur := string(e.Currency)
-		if byCurrency[cur] == nil {
-			byCurrency[cur] = &sums{categories: map[string]decimal.Decimal{}}
-		}
-		s := byCurrency[cur]
-		s.total = s.total.Add(amount)
-		s.count++
-		s.categories[string(e.Category)] = s.categories[string(e.Category)].Add(amount)
+		total = total.Add(amount)
+		categories[string(e.Category)] = categories[string(e.Category)].Add(amount)
 	}
 
-	for _, cur := range models.Currencies {
-		s, ok := byCurrency[string(cur)]
-		if !ok {
-			continue
-		}
-		t := currencyTotal{Currency: string(cur), Symbol: cur.Symbol(), Total: s.total.StringFixed(2), Count: s.count}
-		for cat, sum := range s.categories {
-			pct := 0
-			if s.total.IsPositive() {
-				pct = int(sum.Div(s.total).Mul(decimal.NewFromInt(100)).Round(0).IntPart())
-			}
-			t.Categories = append(t.Categories, categoryTotal{Category: cat, Total: sum.StringFixed(2), Percent: pct})
-		}
-		slices.SortFunc(t.Categories, func(a, b categoryTotal) int {
-			da, _ := decimal.NewFromString(a.Total)
-			db, _ := decimal.NewFromString(b.Total)
-			if c := db.Cmp(da); c != 0 {
-				return c
-			}
-			return strings.Compare(a.Category, b.Category)
-		})
-		out.Totals = append(out.Totals, t)
+	if len(expenses) == 0 {
+		return out
 	}
+	summary := &summaryTotal{Total: total.StringFixed(2), Count: len(expenses)}
+	for cat, sum := range categories {
+		pct := 0
+		if total.IsPositive() {
+			pct = int(sum.Div(total).Mul(decimal.NewFromInt(100)).Round(0).IntPart())
+		}
+		summary.Categories = append(summary.Categories, categoryTotal{Category: cat, Total: sum.StringFixed(2), Percent: pct})
+	}
+	slices.SortFunc(summary.Categories, func(a, b categoryTotal) int {
+		da, _ := decimal.NewFromString(a.Total)
+		db, _ := decimal.NewFromString(b.Total)
+		if c := db.Cmp(da); c != 0 {
+			return c
+		}
+		return strings.Compare(a.Category, b.Category)
+	})
+	out.Summary = summary
 	return out
 }
 
@@ -644,23 +665,28 @@ type formData struct {
 	Range  listFilter
 	Values formValues
 	Errors map[string]string
-}
-
-// currencyOption is one entry of the form's currency select box.
-type currencyOption struct {
-	Code   string
+	// Symbol is the display currency's symbol, shown next to the amount.
 	Symbol string
 }
 
-// Currencies and Categories feed the form's select boxes.
-func (formData) Currencies() []currencyOption {
+// Categories feeds the form's category select box.
+func (formData) Categories() []string { return toStrings(models.Categories) }
+
+// currencyOption is one entry of the display currency select box.
+type currencyOption struct {
+	Code     string
+	Symbol   string
+	Selected bool
+}
+
+// CurrencyOptions feeds the display currency select box.
+func (d resultsData) CurrencyOptions() []currencyOption {
 	out := make([]currencyOption, len(models.Currencies))
 	for i, c := range models.Currencies {
-		out[i] = currencyOption{Code: string(c), Symbol: c.Symbol()}
+		out[i] = currencyOption{Code: string(c), Symbol: c.Symbol(), Selected: c == d.Currency}
 	}
 	return out
 }
-func (formData) Categories() []string { return toStrings(models.Categories) }
 
 // CategoryOptions feeds the category filter's select box.
 func (resultsData) CategoryOptions() []string { return toStrings(models.Categories) }
@@ -677,7 +703,6 @@ func toStrings[T ~string](values []T) []string {
 // be shown again unchanged.
 type formValues struct {
 	Amount        string
-	Currency      string
 	OccurredLocal string // YYYY-MM-DDTHH:MM[:SS] in the expense's own time zone
 	TzOffset      string // minutes east of UTC
 	Category      string
@@ -688,7 +713,6 @@ type formValues struct {
 func formValuesFromForm(v url.Values) formValues {
 	return formValues{
 		Amount:        v.Get("amount"),
-		Currency:      v.Get("currency"),
 		OccurredLocal: v.Get("occurred_local"),
 		TzOffset:      v.Get("tz_offset"),
 		Category:      v.Get("category"),
@@ -701,7 +725,6 @@ func formValuesFrom(e models.Expense) formValues {
 	_, offset := e.OccurredAt.Zone()
 	return formValues{
 		Amount:        e.Amount,
-		Currency:      string(e.Currency),
 		OccurredLocal: e.OccurredAt.Format("2006-01-02T15:04:05"),
 		TzOffset:      strconv.Itoa(offset / 60),
 		Category:      string(e.Category),
@@ -719,7 +742,6 @@ func (v formValues) toInput() (map[string]any, map[string]string) {
 	}
 	return map[string]any{
 		"amount":      v.Amount,
-		"currency":    v.Currency,
 		"occurred_at": occurredAt,
 		"category":    v.Category,
 		"merchant":    v.Merchant,

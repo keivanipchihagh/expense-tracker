@@ -10,25 +10,25 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func expenseAt(id, amount string, currency models.Currency, category models.Category, occurredAt string) models.Expense {
+func expenseAt(id, amount string, category models.Category, occurredAt string) models.Expense {
 	t, err := time.Parse(time.RFC3339, occurredAt)
 	if err != nil {
 		panic(err)
 	}
-	return models.Expense{Id: id, Amount: amount, Currency: currency, Category: category, OccurredAt: t}
+	return models.Expense{Id: id, Amount: amount, Category: category, OccurredAt: t}
 }
 
 func TestBuildResults(t *testing.T) {
 	merchant := "Rewe"
 	expenses := []models.Expense{ // oldest first, as the repository returns them
-		expenseAt("e1", "10.00", models.CurrencyEUR, models.CategoryFood, "2026-11-01T12:00:00+01:00"),
-		expenseAt("e2", "30.00", models.CurrencyEUR, models.CategoryGroceries, "2026-11-02T09:30:00+01:00"),
-		expenseAt("e3", "5.50", models.CurrencyUSD, models.CategoryTransport, "2026-11-03T08:00:00-05:00"),
-		expenseAt("e4", "0.10", models.CurrencyEUR, models.CategoryFood, "2026-11-04T18:00:00+01:00"),
+		expenseAt("e1", "10.00", models.CategoryFood, "2026-11-01T12:00:00+01:00"),
+		expenseAt("e2", "30.00", models.CategoryGroceries, "2026-11-02T09:30:00+01:00"),
+		expenseAt("e3", "5.50", models.CategoryTransport, "2026-11-03T08:00:00-05:00"),
+		expenseAt("e4", "0.10", models.CategoryFood, "2026-11-04T18:00:00+01:00"),
 	}
 	expenses[1].Merchant = &merchant
 
-	got := buildResults(dateRange{From: "2026-11-01", To: "2026-11-30"}, expenses)
+	got := buildResults(dateRange{From: "2026-11-01", To: "2026-11-30"}, expenses, models.CurrencyGBP)
 
 	ids := []string{}
 	for _, r := range got.Rows {
@@ -39,27 +39,34 @@ func TestBuildResults(t *testing.T) {
 	require.Len(t, got.Days, 4, "one group per local date")
 	assert.Equal(t, "Wednesday, 4 November 2026", got.Days[0].Label)
 	assert.Equal(t, "Sunday, 1 November 2026", got.Days[3].Label)
-	assert.Equal(t, expenseRow{Id: "e2", Date: "2026-11-02", Time: "09:30", Offset: "+01:00", Amount: "30.00", Currency: "EUR", Symbol: "€", Category: "groceries", Merchant: "Rewe"}, got.Rows[2])
+	assert.Equal(t, expenseRow{Id: "e2", Date: "2026-11-02", Time: "09:30", Offset: "+01:00", Amount: "30.00", Category: "groceries", Merchant: "Rewe"}, got.Rows[2])
 
-	require.Len(t, got.Totals, 2, "one total per currency; currencies are never added together")
-	usd, eur := got.Totals[0], got.Totals[1] // ordered like models.Currencies
-	assert.Equal(t, "USD", usd.Currency)
-	assert.Equal(t, "$", usd.Symbol)
-	assert.Equal(t, "EUR", eur.Currency)
-	assert.Equal(t, "€", eur.Symbol)
-	assert.Equal(t, "40.10", eur.Total, "exact decimal sum")
-	assert.Equal(t, 3, eur.Count)
+	assert.Equal(t, models.CurrencyGBP, got.Currency)
+	assert.Equal(t, "£", got.Symbol, "amounts are shown in the display currency")
+	require.NotNil(t, got.Summary)
+	assert.Equal(t, "45.60", got.Summary.Total, "one exact decimal sum over every expense")
+	assert.Equal(t, 4, got.Summary.Count)
 	assert.Equal(t, []categoryTotal{
-		{Category: "groceries", Total: "30.00", Percent: 75},
-		{Category: "food", Total: "10.10", Percent: 25},
-	}, eur.Categories, "largest category first")
-	assert.Equal(t, "5.50", usd.Total)
+		{Category: "groceries", Total: "30.00", Percent: 66},
+		{Category: "food", Total: "10.10", Percent: 22},
+		{Category: "transport", Total: "5.50", Percent: 12},
+	}, got.Summary.Categories, "largest category first")
 }
 
 func TestBuildResults_Empty(t *testing.T) {
-	got := buildResults(dateRange{}, []models.Expense{})
+	got := buildResults(dateRange{}, []models.Expense{}, models.CurrencyEUR)
 	assert.Empty(t, got.Rows)
-	assert.Empty(t, got.Totals)
+	assert.Nil(t, got.Summary, "no total card without expenses")
+	assert.Equal(t, "€", got.Symbol)
+}
+
+func TestResultsData_CurrencyOptions(t *testing.T) {
+	got := resultsData{Currency: models.CurrencyUSD}.CurrencyOptions()
+	assert.Equal(t, []currencyOption{
+		{Code: "EUR", Symbol: "€"},
+		{Code: "USD", Symbol: "$", Selected: true},
+		{Code: "GBP", Symbol: "£"},
+	}, got)
 }
 
 func TestFormValues_OccurredAt(t *testing.T) {
@@ -95,7 +102,7 @@ func TestFormValues_OccurredAt(t *testing.T) {
 
 func TestFormValuesFrom_RoundTrips(t *testing.T) {
 	note := "with the team"
-	e := expenseAt("e1", "12.50", models.CurrencyEUR, models.CategoryFood, "2026-11-07T13:20:05-05:00")
+	e := expenseAt("e1", "12.50", models.CategoryFood, "2026-11-07T13:20:05-05:00")
 	e.Note = &note
 
 	v := formValuesFrom(e)

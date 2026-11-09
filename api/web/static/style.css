@@ -163,6 +163,11 @@ input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible
 /* Page header */
 
 .page-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 8px 0 20px; }
+/* On narrow phones the actions wrap under the heading, aligned right. */
+.page-head { flex-wrap: wrap; }
+.page-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+/* Display currency: amounts have no currency, this only changes the symbol. */
+.currency-picker select { width: auto; min-height: 38px; padding: 6px 10px; border-radius: 999px; font-size: .9rem; }
 
 /* Filters */
 
@@ -289,9 +294,9 @@ input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible
 .sheet-head h2 { font-size: 1.1rem; font-weight: 600; }
 
 .amount-field { display: flex; align-items: center; gap: 8px; padding: 6px; border: 1px solid var(--border); border-radius: var(--radius); }
-.amount-field select { width: auto; min-height: 40px; border: 0; background: var(--subtle); border-radius: var(--radius-sm); font-weight: 550; }
+.amount-symbol { padding: 0 4px 0 10px; color: var(--muted); font-size: 1.75rem; font-weight: 650; }
 .amount-field input { border: 0; min-height: 48px; font-size: 1.75rem; font-weight: 650; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
-.amount-field input:focus, .amount-field select:focus { box-shadow: none; }
+.amount-field input:focus { box-shadow: none; }
 .amount-field:focus-within { border-color: var(--text); box-shadow: 0 0 0 3px color-mix(in srgb, var(--text) 12%, transparent); }
 
 .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 16px; }

@@ -133,23 +133,23 @@ func TestUI_ExpenseLifecycle(t *testing.T) {
 	status, _, form := send(t, c, http.MethodGet, s.url+"/ui/expenses/new?"+rangeQuery, nil, hx)
 	require.Equal(t, http.StatusOK, status)
 	assert.Contains(t, form, `hx-post="/ui/expenses"`)
-	assert.Contains(t, form, `<option value="EUR" selected>EUR (€)</option>`)
-	assert.Contains(t, form, `<option value="USD" >USD ($)</option>`)
+	assert.Contains(t, form, `<span class="amount-symbol" aria-hidden="true">€</span>`, "the amount shows the display currency")
+	assert.NotContains(t, form, `name="currency"`, "there is no per-expense currency")
 
 	// A rejected submission shows the form again with the problem
 	bad := url.Values{
 		"from": {"2026-11-01"}, "to": {"2026-11-30"}, "tz_offset": {"60"},
-		"amount": {"1.234"}, "currency": {"EUR"}, "occurred_local": {"2026-11-07T13:20"}, "category": {"food"},
+		"amount": {"1.234"}, "occurred_local": {"2026-11-07T13:20"}, "category": {"food"},
 	}
 	status, _, form = send(t, c, http.MethodPost, s.url+"/ui/expenses", bad, hx)
 	require.Equal(t, http.StatusOK, status)
-	assert.Contains(t, form, "must have at most 2 decimal places for EUR")
+	assert.Contains(t, form, "must have at most 2 decimal places")
 	assert.Contains(t, form, `value="1.234"`, "what you typed is kept")
 
 	// A valid submission closes the editor and refreshes the results
 	good := url.Values{
 		"from": {"2026-11-01"}, "to": {"2026-11-30"}, "tz_offset": {"60"},
-		"amount": {"12.5"}, "currency": {"EUR"}, "occurred_local": {"2026-11-07T13:20"},
+		"amount": {"12.5"}, "occurred_local": {"2026-11-07T13:20"},
 		"category": {"food"}, "merchant": {"Rewe"}, "note": {"team lunch"},
 	}
 	status, _, saved := send(t, c, http.MethodPost, s.url+"/ui/expenses", good, hx)
@@ -195,10 +195,10 @@ func TestUI_TotalsOnPage(t *testing.T) {
 	s := newTestServer(t)
 	s.login(t)
 	for _, body := range []string{
-		`{"amount":"10","currency":"EUR","occurred_at":"2026-11-02T12:00:00+01:00","category":"food"}`,
-		`{"amount":"30","currency":"EUR","occurred_at":"2026-11-03T12:00:00+01:00","category":"groceries"}`,
-		`{"amount":"7.25","currency":"USD","occurred_at":"2026-11-04T12:00:00-05:00","category":"transport"}`,
-		`{"amount":"99","currency":"EUR","occurred_at":"2026-10-31T12:00:00+01:00","category":"travel"}`,
+		`{"amount":"10","occurred_at":"2026-11-02T12:00:00+01:00","category":"food"}`,
+		`{"amount":"30","occurred_at":"2026-11-03T12:00:00+01:00","category":"groceries"}`,
+		`{"amount":"7.25","occurred_at":"2026-11-04T12:00:00-05:00","category":"transport"}`,
+		`{"amount":"99","occurred_at":"2026-10-31T12:00:00+01:00","category":"travel"}`,
 	} {
 		require.Equal(t, http.StatusCreated, s.call(t, http.MethodPost, "/api/v1/expenses", body, nil))
 	}
@@ -208,19 +208,20 @@ func TestUI_TotalsOnPage(t *testing.T) {
 	status, _, page := send(t, c, http.MethodGet, s.url+"/?from=2026-11-01&to=2026-11-30", nil, nil)
 	require.Equal(t, http.StatusOK, status)
 
-	assert.Contains(t, page, "€40.00")
-	assert.Contains(t, page, "$7.25")
+	assert.Contains(t, page, "€47.25", "one total over every expense")
+	assert.Contains(t, page, "€7.25")
+	assert.NotContains(t, page, "$7.25", "everything is shown in the display currency")
 	assert.NotContains(t, page, "99.00", "October is outside the range")
-	assert.Contains(t, page, `value="75"`, "groceries is 75% of EUR spending")
+	assert.Contains(t, page, `value="63"`, "groceries is 63% of spending")
 }
 
 func TestUI_Filters(t *testing.T) {
 	s := newTestServer(t)
 	s.login(t)
 	for _, body := range []string{
-		`{"amount":"10","currency":"EUR","occurred_at":"2026-11-02T12:00:00+01:00","category":"groceries","merchant":"Rewe City"}`,
-		`{"amount":"30","currency":"EUR","occurred_at":"2026-11-03T12:00:00+01:00","category":"groceries","merchant":"Aldi"}`,
-		`{"amount":"5","currency":"EUR","occurred_at":"2026-11-04T12:00:00+01:00","category":"food","merchant":"REWE"}`,
+		`{"amount":"10","occurred_at":"2026-11-02T12:00:00+01:00","category":"groceries","merchant":"Rewe City"}`,
+		`{"amount":"30","occurred_at":"2026-11-03T12:00:00+01:00","category":"groceries","merchant":"Aldi"}`,
+		`{"amount":"5","occurred_at":"2026-11-04T12:00:00+01:00","category":"food","merchant":"REWE"}`,
 	} {
 		require.Equal(t, http.StatusCreated, s.call(t, http.MethodPost, "/api/v1/expenses", body, nil))
 	}
@@ -257,6 +258,86 @@ func TestUI_Filters(t *testing.T) {
 	status, _, page = send(t, c, http.MethodGet, s.url+"/?from=2026-11-01&to=2026-11-30&merchant=lidl", nil, nil)
 	require.Equal(t, http.StatusOK, status)
 	assert.Contains(t, page, "No expenses match these filters.")
+}
+
+func TestUI_DisplayCurrency(t *testing.T) {
+	s := newTestServer(t)
+	s.login(t)
+	require.Equal(t, http.StatusCreated, s.call(t, http.MethodPost, "/api/v1/expenses",
+		`{"amount":"12.5","occurred_at":"2026-11-02T12:00:00+01:00","category":"food"}`, nil))
+	c := browser(t)
+	signIn(t, s, c)
+	hx := map[string]string{"HX-Request": "true"}
+	monthPage := s.url + "/?from=2026-11-01&to=2026-11-30"
+
+	// EUR until the user picks another one.
+	status, _, page := send(t, c, http.MethodGet, monthPage, nil, nil)
+	require.Equal(t, http.StatusOK, status)
+	assert.Contains(t, page, `<option value="EUR" selected>€ EUR</option>`)
+	assert.Contains(t, page, `<option value="USD" >$ USD</option>`)
+	assert.Contains(t, page, `<option value="GBP" >£ GBP</option>`)
+	assert.Contains(t, page, "€12.50")
+
+	// Picking one reloads the page; every amount then shows its symbol.
+	status, header, _ := send(t, c, http.MethodPost, s.url+"/ui/currency", url.Values{"currency": {"GBP"}}, hx)
+	require.Equal(t, http.StatusNoContent, status)
+	assert.Equal(t, "true", header.Get("HX-Refresh"))
+
+	status, _, page = send(t, c, http.MethodGet, monthPage, nil, nil)
+	require.Equal(t, http.StatusOK, status)
+	assert.Contains(t, page, `<option value="GBP" selected>£ GBP</option>`)
+	assert.Contains(t, page, "£12.50")
+	assert.NotContains(t, page, "€12.50")
+
+	status, _, results := send(t, c, http.MethodGet, s.url+"/ui/expenses?from=2026-11-01&to=2026-11-30", nil, hx)
+	require.Equal(t, http.StatusOK, status)
+	assert.Contains(t, results, "£12.50", "partials use it too")
+
+	status, _, form := send(t, c, http.MethodGet, s.url+"/ui/expenses/new", nil, hx)
+	require.Equal(t, http.StatusOK, status)
+	assert.Contains(t, form, `<span class="amount-symbol" aria-hidden="true">£</span>`, "and the add form")
+
+	// Nothing is converted: the stored amount is unchanged.
+	var listed []map[string]any
+	require.Equal(t, http.StatusOK, s.call(t, http.MethodGet, "/api/v1/expenses", "", &listed))
+	require.Len(t, listed, 1)
+	assert.Equal(t, "12.50", listed[0]["amount"])
+
+	// The choice is saved on the server, so a new browser session sees it.
+	other := browser(t)
+	signIn(t, s, other)
+	_, _, page = send(t, other, http.MethodGet, monthPage, nil, nil)
+	assert.Contains(t, page, "£12.50")
+
+	// Without HTMX (a plain form post) it redirects back to the list.
+	status, header, _ = send(t, c, http.MethodPost, s.url+"/ui/currency", url.Values{"currency": {"USD"}}, nil)
+	require.Equal(t, http.StatusSeeOther, status)
+	assert.Equal(t, "/", header.Get("Location"))
+	_, _, page = send(t, c, http.MethodGet, monthPage, nil, nil)
+	assert.Contains(t, page, "$12.50")
+
+	// Unknown currencies are rejected and change nothing.
+	for _, bad := range []string{"", "JPY", "usd"} {
+		status, _, _ = send(t, c, http.MethodPost, s.url+"/ui/currency", url.Values{"currency": {bad}}, hx)
+		assert.Equal(t, http.StatusUnprocessableEntity, status, bad)
+	}
+	_, _, page = send(t, c, http.MethodGet, monthPage, nil, nil)
+	assert.Contains(t, page, "$12.50")
+}
+
+func TestUI_DisplayCurrencyNeedsSessionAndSameOrigin(t *testing.T) {
+	s := newTestServer(t)
+
+	status, _, _ := send(t, browser(t), http.MethodPost, s.url+"/ui/currency", url.Values{"currency": {"GBP"}}, nil)
+	assert.Equal(t, http.StatusSeeOther, status, "signed-out requests go to the login page")
+
+	c := browser(t)
+	signIn(t, s, c)
+	status, _, _ = send(t, c, http.MethodPost, s.url+"/ui/currency", url.Values{"currency": {"GBP"}}, map[string]string{"Sec-Fetch-Site": "cross-site"})
+	assert.Equal(t, http.StatusForbidden, status, "other sites can't change it")
+
+	_, _, page := send(t, c, http.MethodGet, s.url+"/", nil, nil)
+	assert.Contains(t, page, `<option value="EUR" selected>€ EUR</option>`, "still the default")
 }
 
 func TestUI_RejectsCrossOriginPosts(t *testing.T) {

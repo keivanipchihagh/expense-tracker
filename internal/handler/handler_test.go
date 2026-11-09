@@ -19,6 +19,7 @@ type HandlerTestSuite struct {
 	expenseRepo *repositories.MockExpenseRepository
 	oauthRepo   *repositories.MockOAuthRepository
 	sessionRepo *repositories.MockSessionRepository
+	settingRepo *repositories.MockSettingRepository
 }
 
 const (
@@ -32,12 +33,14 @@ func setupHandlerTestSuite(t *testing.T) *HandlerTestSuite {
 	expenseRepo := repositories.NewMockExpenseRepository(ctrl)
 	oauthRepo := repositories.NewMockOAuthRepository(ctrl)
 	sessionRepo := repositories.NewMockSessionRepository(ctrl)
+	settingRepo := repositories.NewMockSettingRepository(ctrl)
 
 	return &HandlerTestSuite{
-		handler:     NewHandler(expenseRepo, oauthRepo, sessionRepo, testPublicUrl, testPassword),
+		handler:     NewHandler(expenseRepo, oauthRepo, sessionRepo, settingRepo, testPublicUrl, testPassword),
 		expenseRepo: expenseRepo,
 		oauthRepo:   oauthRepo,
 		sessionRepo: sessionRepo,
+		settingRepo: settingRepo,
 	}
 }
 
@@ -46,10 +49,12 @@ func TestNewHandler_Panics(t *testing.T) {
 	expenseRepo := repositories.NewMockExpenseRepository(ctrl)
 	oauthRepo := repositories.NewMockOAuthRepository(ctrl)
 	sessionRepo := repositories.NewMockSessionRepository(ctrl)
+	settingRepo := repositories.NewMockSettingRepository(ctrl)
 
-	assert.Panics(t, func() { NewHandler(nil, oauthRepo, sessionRepo, testPublicUrl, testPassword) })
-	assert.Panics(t, func() { NewHandler(expenseRepo, nil, sessionRepo, testPublicUrl, testPassword) })
-	assert.Panics(t, func() { NewHandler(expenseRepo, oauthRepo, nil, testPublicUrl, testPassword) })
-	assert.Panics(t, func() { NewHandler(expenseRepo, oauthRepo, sessionRepo, "", testPassword) })
-	assert.Panics(t, func() { NewHandler(expenseRepo, oauthRepo, sessionRepo, testPublicUrl, "") })
+	assert.Panics(t, func() { NewHandler(nil, oauthRepo, sessionRepo, settingRepo, testPublicUrl, testPassword) })
+	assert.Panics(t, func() { NewHandler(expenseRepo, nil, sessionRepo, settingRepo, testPublicUrl, testPassword) })
+	assert.Panics(t, func() { NewHandler(expenseRepo, oauthRepo, nil, settingRepo, testPublicUrl, testPassword) })
+	assert.Panics(t, func() { NewHandler(expenseRepo, oauthRepo, sessionRepo, nil, testPublicUrl, testPassword) })
+	assert.Panics(t, func() { NewHandler(expenseRepo, oauthRepo, sessionRepo, settingRepo, "", testPassword) })
+	assert.Panics(t, func() { NewHandler(expenseRepo, oauthRepo, sessionRepo, settingRepo, testPublicUrl, "") })
 }
