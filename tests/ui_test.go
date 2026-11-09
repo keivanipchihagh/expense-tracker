@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -338,6 +339,76 @@ func TestUI_DisplayCurrencyNeedsSessionAndSameOrigin(t *testing.T) {
 
 	_, _, page := send(t, c, http.MethodGet, s.url+"/", nil, nil)
 	assert.Contains(t, page, `<option value="EUR" selected>€ EUR</option>`, "still the default")
+}
+
+func TestUI_Analysis(t *testing.T) {
+	s := newTestServer(t)
+
+	status, header, _ := send(t, browser(t), http.MethodGet, s.url+"/analysis", nil, nil)
+	require.Equal(t, http.StatusSeeOther, status, "signed-out visitors go to the login page")
+	assert.Equal(t, "/login", header.Get("Location"))
+
+	c := browser(t)
+	signIn(t, s, c)
+
+	// No expenses yet: the filters show, the charts don't.
+	status, header, page := send(t, c, http.MethodGet, s.url+"/analysis", nil, nil)
+	require.Equal(t, http.StatusOK, status)
+	assert.Contains(t, header.Get("Content-Security-Policy"), "style-src 'self'", "charts need no inline styles")
+	assert.Contains(t, page, `<a href="/analysis" class="active">Analysis</a>`)
+	assert.Contains(t, page, "No expenses in this period.")
+	assert.NotContains(t, page, "<svg class=\"chart\"")
+
+	// Expenses this month, with the date taken from the clock like the page does.
+	s.login(t)
+	month := time.Now().Format("2006-01")
+	for _, body := range []string{
+		`{"amount":"1000","occurred_at":"` + month + `-01T09:00:00+01:00","category":"housing","merchant":"Landlord"}`,
+		`{"amount":"30","occurred_at":"` + month + `-01T12:00:00+01:00","category":"groceries","merchant":"Rewe"}`,
+		`{"amount":"20","occurred_at":"` + month + `-01T18:00:00+01:00","category":"groceries","merchant":"Rewe"}`,
+		`{"amount":"7.5","occurred_at":"` + month + `-01T13:00:00+01:00","category":"food"}`,
+	} {
+		require.Equal(t, http.StatusCreated, s.call(t, http.MethodPost, "/api/v1/expenses", body, nil))
+	}
+
+	status, _, page = send(t, c, http.MethodGet, s.url+"/analysis?period=month", nil, nil)
+	require.Equal(t, http.StatusOK, status)
+	assert.Contains(t, page, `<p class="kpi-value">€1057.50</p>`)
+	assert.Contains(t, page, "Where it went")
+	assert.Contains(t, page, `<span class="cat">housing</span>`)
+	assert.Contains(t, page, "Spending per day")
+	assert.Contains(t, page, `<svg class="chart"`)
+	assert.Contains(t, page, "Top merchants")
+	assert.Contains(t, page, `<td class="num">2</td><td class="num">€50.00</td>`, "Rewe: two purchases")
+	assert.Contains(t, page, "1 expense without a merchant isn't listed.")
+	assert.NotContains(t, page, "Compared with", "nothing last month to compare against")
+	assert.NotContains(t, page, "style=", "no inline styles anywhere")
+
+	// Without housing.
+	_, _, page = send(t, c, http.MethodGet, s.url+"/analysis?period=month&scope=no-housing", nil, nil)
+	assert.Contains(t, page, `<p class="kpi-value">€57.50</p>`)
+	assert.NotContains(t, page, `<span class="cat">housing</span>`)
+	assert.Contains(t, page, `<option value="no-housing" selected>Everything except housing</option>`)
+	assert.Contains(t, page, `href="/analysis?period=3m&amp;scope=no-housing"`, "period links keep the scope")
+
+	// One category: no breakdown, and the totals follow.
+	_, _, page = send(t, c, http.MethodGet, s.url+"/analysis?period=month&scope=groceries", nil, nil)
+	assert.Contains(t, page, `<p class="kpi-value">€50.00</p>`)
+	assert.NotContains(t, page, "Where it went")
+
+	// The display currency applies here too.
+	require.Equal(t, http.StatusNoContent, func() int {
+		status, _, _ := send(t, c, http.MethodPost, s.url+"/ui/currency", url.Values{"currency": {"USD"}}, map[string]string{"HX-Request": "true"})
+		return status
+	}())
+	_, _, page = send(t, c, http.MethodGet, s.url+"/analysis?period=all", nil, nil)
+	assert.Contains(t, page, `<p class="kpi-value">$1057.50</p>`)
+
+	// Unknown parameters fall back instead of failing.
+	status, _, page = send(t, c, http.MethodGet, s.url+"/analysis?period=decade&scope=pets", nil, nil)
+	require.Equal(t, http.StatusOK, status)
+	assert.Contains(t, page, `aria-current="true"
+       hx-get="/analysis?period=month"`, "this month is selected")
 }
 
 func TestUI_RejectsCrossOriginPosts(t *testing.T) {

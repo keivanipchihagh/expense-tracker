@@ -1,0 +1,159 @@
+{{define "analysis.html"}}{{template "layout" .}}{{end}}
+
+{{define "content"}}
+{{with .Analysis}}{{$sym := .Symbol}}
+<div id="analysis">
+<div class="page-head">
+  <div>
+    <h1>Analysis</h1>
+    <p class="muted">{{.RangeLabel}}{{with .TrackedFrom}} · figures start at your first expense, {{.}}{{end}}</p>
+  </div>
+</div>
+
+<div class="filters">
+  <nav class="segmented" aria-label="Period">
+    {{range .Periods}}
+    <a href="/analysis?{{.Query}}" class="{{if .Active}}active{{end}}" {{if .Active}}aria-current="true"{{end}}
+       hx-get="/analysis?{{.Query}}" hx-target="#analysis" hx-select="#analysis" hx-swap="outerHTML" hx-push-url="true">{{.Label}}</a>
+    {{end}}
+  </nav>
+  <form class="scope-picker" action="/analysis" hx-get="/analysis" hx-target="#analysis" hx-select="#analysis" hx-swap="outerHTML" hx-push-url="true" hx-trigger="change">
+    <input type="hidden" name="period" value="{{.Period}}">
+    <select name="scope" aria-label="Categories to include">
+      {{range .ScopeOptions}}<option value="{{.Value}}" {{if .Selected}}selected{{end}}>{{.Label}}</option>{{end}}
+    </select>
+  </form>
+</div>
+
+{{if .Empty}}
+<div class="empty">
+  <p class="empty-title">No expenses in this period.</p>
+  <p class="muted">Pick a longer period, or include more categories.</p>
+</div>
+{{else}}
+
+<section class="kpis" aria-label="Summary">
+  <article class="kpi">
+    <p class="kpi-label">Spent</p>
+    <p class="kpi-value">{{$sym}}{{.Total}}</p>
+    {{with .TotalDelta}}
+    <p class="kpi-sub"><span class="delta {{if .Up}}up{{else}}down{{end}}">{{if .Up}}▲{{else}}▼{{end}} {{.Text}}</span> vs {{.Against}}</p>
+    {{else}}<p class="kpi-sub">over {{.Days}} day{{if ne .Days 1}}s{{end}}</p>{{end}}
+  </article>
+  <article class="kpi">
+    <p class="kpi-label">Per day</p>
+    <p class="kpi-value">{{$sym}}{{.PerDay}}</p>
+    <p class="kpi-sub">over {{.Days}} day{{if ne .Days 1}}s{{end}} so far</p>
+  </article>
+  <article class="kpi">
+    <p class="kpi-label">Expenses</p>
+    <p class="kpi-value">{{.Count}}</p>
+    <p class="kpi-sub">{{$sym}}{{.Average}} on average</p>
+  </article>
+  {{with .Largest}}
+  <article class="kpi">
+    <p class="kpi-label">Largest</p>
+    <p class="kpi-value">{{$sym}}{{.Amount}}</p>
+    <p class="kpi-sub">{{.Label}} · {{.Date}}</p>
+  </article>
+  {{end}}
+</section>
+
+{{with .Pace}}
+<section class="card">
+  <header class="card-head">
+    <h2>Compared with {{.PrevName}}</h2>
+    <p class="muted small-text">
+      {{if .InProgress}}{{$sym}}{{.Current}} so far, against {{$sym}}{{.PreviousSameDay}} at the same point {{.PrevName}}. {{title .PrevName}} ended at {{$sym}}{{.PreviousTotal}}.
+      {{else}}{{$sym}}{{.Current}} in total, against {{$sym}}{{.PreviousTotal}} {{.PrevName}}.{{end}}
+    </p>
+  </header>
+  <ul class="legend">
+    <li><span class="key key-current" aria-hidden="true"></span>{{.CurrentName}}</li>
+    <li><span class="key key-previous" aria-hidden="true"></span>{{title .PrevName}}</li>
+  </ul>
+  <div class="plot">
+    <div class="y-ticks" aria-hidden="true">{{range .Ticks}}<span>{{.}}</span>{{end}}</div>
+    <div class="plot-area">
+      <svg class="chart" viewBox="0 0 1000 200" preserveAspectRatio="none" role="img" aria-label="Cumulative spending by day, {{.CurrentName}} against {{.PrevName}}">
+        <g class="grid"><line x1="0" x2="1000" y1="0.5" y2="0.5"/><line x1="0" x2="1000" y1="50" y2="50"/><line x1="0" x2="1000" y1="100" y2="100"/><line x1="0" x2="1000" y1="150" y2="150"/></g>
+        <line class="baseline" x1="0" x2="1000" y1="199.5" y2="199.5"/>
+        <polygon class="area" points="{{.CurrentArea}}"/>
+        <polyline class="line line-previous" points="{{.PreviousPoints}}"/>
+        <polyline class="line line-current" points="{{.CurrentPoints}}"/>
+        {{range .Hits}}<rect class="hit" x="{{printf "%.2f" .X}}" y="0" width="{{printf "%.2f" .W}}" height="200"><title>{{.Title}}</title></rect>{{end}}
+      </svg>
+      <div class="x-ends" aria-hidden="true"><span>{{.StartLabel}}</span><span>{{.EndLabel}}</span></div>
+    </div>
+  </div>
+</section>
+{{end}}
+
+{{if .Categories}}
+<section class="card">
+  <header class="card-head">
+    <h2>Where it went</h2>
+    <p class="muted small-text">Share of {{$sym}}{{.Total}}. Select a category to see its expenses.</p>
+  </header>
+  <ul class="cat-bars">
+    {{range .Categories}}
+    <li>
+      <a href="{{.Href}}" title="{{title .Category}}: {{$sym}}{{.Total}} ({{.Share}}%)">
+        <span class="cat">{{.Category}}</span>
+        <meter class="bar" min="0" max="100" value="{{.Length}}" aria-hidden="true"></meter>
+        <span class="num">{{$sym}}{{.Total}}</span>
+        <span class="share">{{.Share}}%</span>
+      </a>
+    </li>
+    {{end}}
+  </ul>
+</section>
+{{end}}
+
+{{with .Timeline}}
+<section class="card">
+  <header class="card-head">
+    <h2>Spending per {{.Unit}}</h2>
+    {{if .Average}}<p class="muted small-text">The line is the average: {{$sym}}{{.Average}} per {{.Unit}}.</p>{{end}}
+  </header>
+  <div class="plot">
+    <div class="y-ticks" aria-hidden="true">{{range .Ticks}}<span>{{.}}</span>{{end}}</div>
+    <div class="plot-area">
+      <svg class="chart" viewBox="0 0 1000 200" preserveAspectRatio="none" role="img" aria-label="Spending per {{.Unit}}">
+        <g class="grid"><line x1="0" x2="1000" y1="0.5" y2="0.5"/><line x1="0" x2="1000" y1="50" y2="50"/><line x1="0" x2="1000" y1="100" y2="100"/><line x1="0" x2="1000" y1="150" y2="150"/></g>
+        <line class="baseline" x1="0" x2="1000" y1="199.5" y2="199.5"/>
+        {{range .Buckets}}
+        <g class="col{{if .Future}} future{{end}}"><title>{{.Title}}</title>
+          <rect class="hit" x="{{printf "%.2f" .SlotX}}" y="0" width="{{printf "%.2f" .SlotW}}" height="200"/>
+          {{if .H}}<rect class="col-bar" x="{{printf "%.2f" .X}}" y="{{printf "%.2f" .Y}}" width="{{printf "%.2f" .W}}" height="{{printf "%.2f" .H}}" rx="3" ry="3"/><rect class="col-bar" x="{{printf "%.2f" .X}}" y="{{printf "%.2f" .BaseY}}" width="{{printf "%.2f" .W}}" height="{{printf "%.2f" .BaseH}}"/>{{end}}
+        </g>
+        {{end}}
+        {{if .Average}}<line class="avg" x1="0" x2="1000" y1="{{printf "%.2f" .AvgY}}" y2="{{printf "%.2f" .AvgY}}"/>{{end}}
+      </svg>
+      <div class="x-labels" aria-hidden="true">{{range .Buckets}}<span>{{if .ShowLabel}}{{.Label}}{{end}}</span>{{end}}</div>
+    </div>
+  </div>
+</section>
+{{end}}
+
+{{if .Merchants}}
+<section class="card">
+  <header class="card-head">
+    <h2>Top merchants</h2>
+    {{if .Unnamed}}<p class="muted small-text">{{.Unnamed}} expense{{if ne .Unnamed 1}}s{{end}} without a merchant {{if eq .Unnamed 1}}isn't{{else}}aren't{{end}} listed.</p>{{end}}
+  </header>
+  <table class="merchants">
+    <thead><tr><th scope="col">Merchant</th><th scope="col" class="num">Purchases</th><th scope="col" class="num">Total</th><th scope="col" class="num">Share</th></tr></thead>
+    <tbody>
+      {{range .Merchants}}
+      <tr><td><a href="{{.Href}}">{{.Name}}</a></td><td class="num">{{.Count}}</td><td class="num">{{$sym}}{{.Total}}</td><td class="num">{{.Share}}%</td></tr>
+      {{end}}
+    </tbody>
+  </table>
+</section>
+{{end}}
+
+{{end}}
+</div>
+{{end}}
+{{end}}
