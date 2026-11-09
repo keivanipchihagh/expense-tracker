@@ -1,0 +1,29 @@
+{{define "authorize.html"}}{{template "layout" .}}{{end}}
+
+{{define "content"}}
+<section class="login">
+  <span class="brand-mark large" aria-hidden="true"></span>
+  {{with .Authorize}}
+  <h1>Sign in to expense-tracker</h1>
+  <p class="muted"><strong>{{with .Client.Name}}{{.}}{{else}}An unnamed app{{end}}</strong> wants access to your expenses.</p>
+  {{if .Error}}<p class="alert" role="alert">{{.Error}}</p>{{end}}
+  <form method="post" action="/oauth/authorize">
+    <input type="hidden" name="response_type" value="{{.Request.ResponseType}}">
+    <input type="hidden" name="client_id" value="{{.Request.ClientId}}">
+    <input type="hidden" name="redirect_uri" value="{{.Request.RedirectUri}}">
+    <input type="hidden" name="code_challenge" value="{{.Request.CodeChallenge}}">
+    <input type="hidden" name="code_challenge_method" value="{{.Request.CodeChallengeMethod}}">
+    <input type="hidden" name="state" value="{{.Request.State}}">
+    <input type="hidden" name="resource" value="{{.Request.Resource}}">
+    <label class="sr-only" for="password">Password</label>
+    <input id="password" type="password" name="password" placeholder="Password" autocomplete="current-password" required autofocus>
+    <button type="submit" class="primary block">Sign in</button>
+  </form>
+  <p class="login-note muted">After you sign in you'll be sent to <strong>{{.RedirectHost}}</strong>. If you don't recognise it, close this page.</p>
+  {{else}}
+  <h1>Sign-in problem</h1>
+  <p class="alert" role="alert">{{.Error}}</p>
+  <p class="muted">Start the sign-in again from the app that sent you here.</p>
+  {{end}}
+</section>
+{{end}}

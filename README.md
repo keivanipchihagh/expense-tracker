@@ -80,7 +80,7 @@ Clients connecting from the internet (ChatGPT, claude.ai, Gemini) need `PUBLIC_U
 | `GET /.well-known/oauth-protected-resource` | Which authorization server protects this API (RFC 9728) |
 | `GET /.well-known/oauth-authorization-server` | OAuth endpoints and capabilities (RFC 8414) |
 | `POST /oauth/register` | Dynamic client registration (RFC 7591) |
-| `GET/POST /oauth/authorize` | Login page |
+| `GET/POST /oauth/authorize` | Login page, styled like the UI (with the theme switch) |
 | `POST /oauth/token` | `authorization_code` and `refresh_token` grants |
 
 ## Tables

@@ -3,7 +3,6 @@ package api
 import (
 	"encoding/json"
 	"errors"
-	"html/template"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -95,13 +94,13 @@ func (s *Server) AuthorizePage(w http.ResponseWriter, r *http.Request) {
 		s.writeAuthorizeError(w, r, req, err)
 		return
 	}
-	renderLogin(w, http.StatusOK, loginPage{Client: client, Request: req})
+	s.renderLogin(w, http.StatusOK, loginPage{Client: client, Request: req})
 }
 
 // AuthorizeSubmit handles POST /oauth/authorize: the login form.
 func (s *Server) AuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
-		renderError(w, http.StatusBadRequest, "The login form could not be read.")
+		s.renderAuthorizeError(w, http.StatusBadRequest, "The login form could not be read.")
 		return
 	}
 	req := authorizeRequestFrom(r.PostForm)
@@ -110,9 +109,9 @@ func (s *Server) AuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case errors.Is(err, handler.ErrWrongPassword):
 		client, _ := s.handler.CheckAuthorizeRequest(r.Context(), req)
-		renderLogin(w, http.StatusUnauthorized, loginPage{Client: client, Request: req, Error: "Wrong password."})
+		s.renderLogin(w, http.StatusUnauthorized, loginPage{Client: client, Request: req, Error: "Wrong password."})
 	case errors.Is(err, handler.ErrTooManyLogins):
-		renderError(w, http.StatusTooManyRequests, "Too many failed logins. Try again in 15 minutes.")
+		s.renderAuthorizeError(w, http.StatusTooManyRequests, "Too many failed logins. Try again in 15 minutes.")
 	case err != nil:
 		s.writeAuthorizeError(w, r, req, err)
 	default:
@@ -169,11 +168,11 @@ func (s *Server) writeAuthorizeError(w http.ResponseWriter, r *http.Request, req
 			http.Redirect(w, r, s.handler.AuthorizeErrorRedirect(req, authErr), http.StatusFound)
 			return
 		}
-		renderError(w, http.StatusBadRequest, "This login link is invalid: "+authErr.Description+".")
+		s.renderAuthorizeError(w, http.StatusBadRequest, "This login link is invalid: "+authErr.Description+".")
 		return
 	}
 	slog.ErrorContext(r.Context(), "authorize failed", "error", err)
-	renderError(w, http.StatusInternalServerError, "Something went wrong. Try again.")
+	s.renderAuthorizeError(w, http.StatusInternalServerError, "Something went wrong. Try again.")
 }
 
 // writeOAuthError writes an OAuth error as {"error", "error_description"}.
@@ -216,58 +215,28 @@ func (p loginPage) RedirectHost() string {
 	return u.Host
 }
 
-// The page loads nothing external, can't be framed and only runs inline CSS.
-const pageCsp = "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'"
+// authorizeCsp is the UI's policy without form-action: browsers apply
+// form-action to the redirect after the login form is submitted, and that
+// redirect goes to the client's own callback (another origin by design).
+const authorizeCsp = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
+	"frame-ancestors 'none'; base-uri 'none'"
 
-func renderLogin(w http.ResponseWriter, status int, page loginPage) {
-	renderPage(w, status, loginTemplate, page)
+// renderLogin shows the OAuth login page, styled like the rest of the UI.
+func (s *Server) renderLogin(w http.ResponseWriter, status int, page loginPage) {
+	s.renderAuthorize(w, status, pageData{Title: "Sign in", Authorize: &page})
 }
 
-func renderError(w http.ResponseWriter, status int, message string) {
-	renderPage(w, status, errorTemplate, message)
+// renderAuthorizeError shows a sign-in problem the client can't be told
+// about (for example, an unknown redirect URI).
+func (s *Server) renderAuthorizeError(w http.ResponseWriter, status int, message string) {
+	s.renderAuthorize(w, status, pageData{Title: "Sign-in problem", Error: message})
 }
 
-func renderPage(w http.ResponseWriter, status int, tmpl *template.Template, data any) {
+func (s *Server) renderAuthorize(w http.ResponseWriter, status int, data pageData) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Content-Security-Policy", pageCsp)
+	w.Header().Set("Content-Security-Policy", authorizeCsp)
 	w.WriteHeader(status)
-	if err := tmpl.Execute(w, data); err != nil {
-		slog.Error("render page failed", "error", err)
+	if err := pages["authorize.html"].ExecuteTemplate(w, "authorize.html", data); err != nil {
+		slog.Error("render authorize page failed", "error", err)
 	}
 }
-
-const pageStyle = `<style>
-body{font-family:system-ui,sans-serif;background:#f5f5f4;color:#1c1917;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0;padding:16px}
-main{background:#fff;border:1px solid #e7e5e4;border-radius:12px;padding:28px;max-width:380px;width:100%}
-h1{font-size:1.2rem;margin:0 0 12px}p{line-height:1.5;margin:0 0 16px}
-input{width:100%;box-sizing:border-box;padding:10px;border:1px solid #d6d3d1;border-radius:8px;font-size:1rem;margin-bottom:12px}
-button{width:100%;padding:10px;border:0;border-radius:8px;background:#1c1917;color:#fff;font-size:1rem;cursor:pointer}
-.error{color:#b91c1c}.muted{color:#78716c;font-size:.9rem}
-@media (prefers-color-scheme:dark){body{background:#1c1917;color:#f5f5f4}main{background:#292524;border-color:#44403c}input{background:#1c1917;color:#f5f5f4;border-color:#57534e}button{background:#f5f5f4;color:#1c1917}}
-</style>`
-
-var loginTemplate = template.Must(template.New("login").Parse(`<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Sign in · expense-tracker</title>` + pageStyle + `</head>
-<body><main>
-<h1>Sign in to expense-tracker</h1>
-<p><strong>{{.Client.Name}}</strong> wants access to your expenses.</p>
-<p class="muted">After you sign in you'll be sent to <strong>{{.RedirectHost}}</strong>. If you don't recognise it, close this page.</p>
-{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
-<form method="post" action="/oauth/authorize">
-<input type="hidden" name="response_type" value="{{.Request.ResponseType}}">
-<input type="hidden" name="client_id" value="{{.Request.ClientId}}">
-<input type="hidden" name="redirect_uri" value="{{.Request.RedirectUri}}">
-<input type="hidden" name="code_challenge" value="{{.Request.CodeChallenge}}">
-<input type="hidden" name="code_challenge_method" value="{{.Request.CodeChallengeMethod}}">
-<input type="hidden" name="state" value="{{.Request.State}}">
-<input type="hidden" name="resource" value="{{.Request.Resource}}">
-<input type="password" name="password" placeholder="Password" autocomplete="current-password" required autofocus>
-<button type="submit">Sign in</button>
-</form>
-</main></body></html>`))
-
-var errorTemplate = template.Must(template.New("error").Parse(`<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Sign-in problem · expense-tracker</title>` + pageStyle + `</head>
-<body><main><h1>Sign-in problem</h1><p>{{.}}</p></main></body></html>`))

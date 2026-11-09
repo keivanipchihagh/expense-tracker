@@ -295,6 +295,57 @@ func TestOAuthFlow(t *testing.T) {
 	assert.Equal(t, "invalid_grant", oauthErr["error"], "a refresh token works only once")
 }
 
+func TestOAuthLoginPage_MatchesUi(t *testing.T) {
+	s := newTestServer(t)
+	clientId := s.register(t)
+	get := func(params url.Values) (int, http.Header, string) {
+		resp, err := http.Get(s.url + "/oauth/authorize?" + params.Encode())
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		page, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, resp.Header, string(page)
+	}
+
+	params := authorizeParams(clientId)
+	params.Set("state", `"><script>alert(1)</script>`)
+	status, header, page := get(params)
+	require.Equal(t, http.StatusOK, status)
+
+	// The shared stylesheet, layout and theme switch; no inline styles.
+	assert.Contains(t, page, `<link rel="stylesheet" href="/static/style.css">`)
+	assert.Contains(t, page, `<script src="/static/theme.js"></script>`)
+	assert.Contains(t, page, "data-theme-toggle", "the theme switch is in the top bar")
+	assert.Contains(t, page, `<section class="login">`)
+	assert.Contains(t, page, `<button type="submit" class="primary block">Sign in</button>`)
+	assert.NotContains(t, page, "<style")
+	assert.NotContains(t, page, "style=")
+	assert.NotContains(t, page, "Sign out", "the visitor isn't signed in to the UI")
+
+	csp := header.Get("Content-Security-Policy")
+	assert.Contains(t, csp, "style-src 'self'")
+	assert.Contains(t, csp, "script-src 'self'")
+	assert.Contains(t, csp, "frame-ancestors 'none'")
+	assert.NotContains(t, csp, "unsafe-inline")
+	assert.NotContains(t, csp, "form-action", "browsers would block the redirect to the client's callback")
+
+	// Every OAuth parameter rides along, escaped.
+	for _, field := range []string{"response_type", "client_id", "redirect_uri", "code_challenge", "code_challenge_method", "state", "resource"} {
+		assert.Contains(t, page, `name="`+field+`"`)
+	}
+	assert.NotContains(t, page, "<script>alert(1)</script>")
+	assert.Contains(t, page, `value="&#34;&gt;&lt;script&gt;alert(1)&lt;/script&gt;"`)
+
+	// Problems that can't go back to the client get the same look.
+	bad := authorizeParams(clientId)
+	bad.Set("redirect_uri", "https://evil.example/callback")
+	status, header, page = get(bad)
+	assert.Equal(t, http.StatusBadRequest, status)
+	assert.Contains(t, page, "<h1>Sign-in problem</h1>")
+	assert.Contains(t, page, `<p class="alert" role="alert">This login link is invalid:`)
+	assert.Contains(t, page, `href="/static/style.css"`)
+	assert.NotContains(t, header.Get("Content-Security-Policy"), "unsafe-inline")
+}
+
 func TestHealthHidesVersion(t *testing.T) {
 	s := newTestServer(t)
 	resp, err := http.Get(s.url + "/health")

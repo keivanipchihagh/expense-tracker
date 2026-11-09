@@ -47,7 +47,7 @@ var templateFuncs = template.FuncMap{
 // pages are parsed once: each page gets the layout and the shared partials.
 var pages = func() map[string]*template.Template {
 	out := map[string]*template.Template{}
-	for _, page := range []string{"index.html", "login.html", "apps.html", "analysis.html", "error.html"} {
+	for _, page := range []string{"index.html", "login.html", "apps.html", "analysis.html", "authorize.html", "error.html"} {
 		out[page] = template.Must(template.New(page).Funcs(templateFuncs).ParseFS(webFS,
 			"web/templates/layout.html", "web/templates/results.html", "web/templates/form.html", "web/templates/"+page))
 	}
@@ -404,6 +404,8 @@ type pageData struct {
 	Results  resultsData
 	Apps     []appRow
 	Analysis analysisData
+	// Authorize is the OAuth login page; nil on its error page.
+	Authorize *loginPage
 }
 
 // appRow is a connected app as shown on the apps page.
