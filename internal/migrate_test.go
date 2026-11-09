@@ -67,7 +67,9 @@ func open(t *testing.T, db *sqlite.Client) stack {
 	require.NoError(t, err)
 	users, err := repositories.NewUserRepository(ctx, db)
 	require.NoError(t, err)
-	h := handler.NewHandler(expenses, oauth, sessions, users, "http://localhost:8000", false)
+	categories, err := repositories.NewCategoryRepository(ctx, db)
+	require.NoError(t, err)
+	h := handler.NewHandler(expenses, oauth, sessions, users, categories, "http://localhost:8000", false)
 	h.SetBcryptCost(bcrypt.MinCost)
 	return stack{db: db, h: h, expenses: expenses, users: users}
 }

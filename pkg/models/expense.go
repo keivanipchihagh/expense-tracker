@@ -59,7 +59,8 @@ func (c Currency) Symbol() string {
 	return string(c)
 }
 
-// Category is what kind of spending an expense is.
+// Category is what kind of spending an expense is. Each user has their own
+// list (see CategoryUsage); names are stored lowercase.
 type Category string
 
 const (
@@ -78,8 +79,8 @@ const (
 	CategoryOther         Category = "other"
 )
 
-// Categories lists the accepted categories.
-var Categories = []Category{
+// DefaultCategories are the categories every account starts with.
+var DefaultCategories = []Category{
 	CategoryFood, CategoryGroceries, CategoryTransport, CategoryHousing,
 	CategoryUtilities, CategoryHealth, CategoryEntertainment, CategoryShopping,
 	CategoryTravel, CategorySubscriptions, CategoryEducation, CategoryGifts,
@@ -119,8 +120,21 @@ func (e *Expense) String() string {
 // IsValid reports whether c is a display currency.
 func (c Currency) IsValid() bool { return slices.Contains(Currencies, c) }
 
-// IsValid reports whether c is an accepted category.
-func (c Category) IsValid() bool { return slices.Contains(Categories, c) }
+// Limits on a user's categories.
+const (
+	MaxCategoryLength = 30
+	MaxCategories     = 50
+)
+
+// CategoryUsage is one of a user's categories and how many of their
+// expenses use it.
+type CategoryUsage struct {
+	Name     Category `json:"name"`
+	Expenses int      `json:"expenses"`
+}
+
+// HasCategory reports whether c is in list.
+func HasCategory(list []Category, c Category) bool { return slices.Contains(list, c) }
 
 // ExpenseFilter selects expenses to list. Zero fields don't filter.
 type ExpenseFilter struct {

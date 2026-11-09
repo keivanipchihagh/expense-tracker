@@ -81,6 +81,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("PATCH /api/v1/me", s.UpdateMe)
 	mux.HandleFunc("PUT /api/v1/me/password", s.ChangeMyPassword)
 	mux.HandleFunc("GET /api/v1/me/export", s.ExportMe)
+	mux.HandleFunc("GET /api/v1/categories", s.ListCategories)
+	mux.HandleFunc("POST /api/v1/categories", s.AddCategory)
+	mux.HandleFunc("DELETE /api/v1/categories/{name}", s.RemoveCategory)
 	mux.HandleFunc("DELETE /api/v1/me", s.DeleteMe)
 
 	// MCP (Streamable HTTP)
@@ -107,6 +110,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /settings/password", s.requireSession(s.PasswordSubmit))
 	mux.HandleFunc("GET /settings/export", s.requireSession(s.ExportDataDownload))
 	mux.HandleFunc("POST /settings/delete", s.requireSession(s.DeleteAccountSubmit))
+	mux.HandleFunc("POST /settings/categories", s.requireSession(s.AddCategorySubmit))
+	mux.HandleFunc("POST /settings/categories/delete", s.requireSession(s.RemoveCategorySubmit))
 	mux.HandleFunc("GET /account", s.AccountRedirect)
 	mux.HandleFunc("GET /ui/export", s.requireSession(s.ExportExpenses))
 	mux.HandleFunc("GET /analysis", s.requireSession(s.AnalysisPage))

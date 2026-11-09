@@ -131,6 +131,8 @@ func TestUserRepository_Delete(t *testing.T) {
 	require.NoError(t, err)
 	oauth, err := NewOAuthRepository(ctx, client)
 	require.NoError(t, err)
+	_, err = NewCategoryRepository(ctx, client)
+	require.NoError(t, err)
 
 	now := time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC)
 	for _, u := range []models.User{newUser("u1", "alice@example.com"), newUser("u2", "bob@example.com")} {

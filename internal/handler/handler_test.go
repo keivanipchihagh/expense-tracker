@@ -26,6 +26,17 @@ type HandlerTestSuite struct {
 	oauthRepo   *repositories.MockOAuthRepository
 	sessionRepo *repositories.MockSessionRepository
 	userRepo    *repositories.MockUserRepository
+	categories  *repositories.MockCategoryRepository
+}
+
+// defaultUsage is the default categories, none in use: what the test user
+// has unless a test says otherwise.
+func defaultUsage() []models.CategoryUsage {
+	out := make([]models.CategoryUsage, len(models.DefaultCategories))
+	for i, c := range models.DefaultCategories {
+		out[i] = models.CategoryUsage{Name: c}
+	}
+	return out
 }
 
 const (
@@ -53,8 +64,13 @@ func setupHandlerTestSuite(t *testing.T) *HandlerTestSuite {
 	oauthRepo := repositories.NewMockOAuthRepository(ctrl)
 	sessionRepo := repositories.NewMockSessionRepository(ctrl)
 	userRepo := repositories.NewMockUserRepository(ctrl)
+	categories := repositories.NewMockCategoryRepository(ctrl)
+	// The test user has the default categories; tests about categories
+	// use their own controller.
+	categories.EXPECT().List(gomock.Any(), gomock.Any()).Return(defaultUsage(), nil).AnyTimes()
+	categories.EXPECT().Seed(gomock.Any(), gomock.Any(), models.DefaultCategories, gomock.Any()).Return(nil).AnyTimes()
 
-	h := NewHandler(expenseRepo, oauthRepo, sessionRepo, userRepo, testPublicUrl, true)
+	h := NewHandler(expenseRepo, oauthRepo, sessionRepo, userRepo, categories, testPublicUrl, true)
 	h.SetBcryptCost(bcrypt.MinCost)
 	return &HandlerTestSuite{
 		handler:     h,
@@ -62,6 +78,7 @@ func setupHandlerTestSuite(t *testing.T) *HandlerTestSuite {
 		oauthRepo:   oauthRepo,
 		sessionRepo: sessionRepo,
 		userRepo:    userRepo,
+		categories:  categories,
 	}
 }
 
@@ -82,9 +99,11 @@ func TestNewHandler_Panics(t *testing.T) {
 	sessionRepo := repositories.NewMockSessionRepository(ctrl)
 	userRepo := repositories.NewMockUserRepository(ctrl)
 
-	assert.Panics(t, func() { NewHandler(nil, oauthRepo, sessionRepo, userRepo, testPublicUrl, true) })
-	assert.Panics(t, func() { NewHandler(expenseRepo, nil, sessionRepo, userRepo, testPublicUrl, true) })
-	assert.Panics(t, func() { NewHandler(expenseRepo, oauthRepo, nil, userRepo, testPublicUrl, true) })
-	assert.Panics(t, func() { NewHandler(expenseRepo, oauthRepo, sessionRepo, nil, testPublicUrl, true) })
-	assert.Panics(t, func() { NewHandler(expenseRepo, oauthRepo, sessionRepo, userRepo, "", true) })
+	categories := repositories.NewMockCategoryRepository(ctrl)
+	assert.Panics(t, func() { NewHandler(nil, oauthRepo, sessionRepo, userRepo, categories, testPublicUrl, true) })
+	assert.Panics(t, func() { NewHandler(expenseRepo, nil, sessionRepo, userRepo, categories, testPublicUrl, true) })
+	assert.Panics(t, func() { NewHandler(expenseRepo, oauthRepo, nil, userRepo, categories, testPublicUrl, true) })
+	assert.Panics(t, func() { NewHandler(expenseRepo, oauthRepo, sessionRepo, nil, categories, testPublicUrl, true) })
+	assert.Panics(t, func() { NewHandler(expenseRepo, oauthRepo, sessionRepo, userRepo, nil, testPublicUrl, true) })
+	assert.Panics(t, func() { NewHandler(expenseRepo, oauthRepo, sessionRepo, userRepo, categories, "", true) })
 }

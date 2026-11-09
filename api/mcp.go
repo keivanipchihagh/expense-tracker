@@ -23,7 +23,7 @@ const mcpInstructions = `Expense log for one person. Use these tools to record, 
 
 - amount: decimal string with at most 2 decimals, e.g. "12.50". Always positive. Amounts have no currency: the user picks one display currency in the web UI. If the user names a different currency, ask before logging.
 - occurred_at: RFC 3339 timestamp WITH the user's UTC offset, e.g. "2026-11-07T13:20:00+01:00". If the user doesn't say when, use the current time in their time zone.
-- category: pick the closest of the allowed values; use "other" if nothing fits.
+- category: one of the user's own categories (the tool schemas list them); pick the closest, or "other" if nothing fits and they have it. Users add categories in the web UI's settings.
 - merchant: the store or vendor, if known.
 - note: only extra words the user said about the expense. Leave it out otherwise; don't invent one.
 
@@ -33,6 +33,22 @@ To fix a mistake, use update_expense with only the fields that change. To find a
 // exposes the same operations as the REST API and goes through the same
 // handler, so validation and change logs are identical.
 func (s *Server) NewMcpHandler() http.Handler {
+	return mcp.NewStreamableHTTPHandler(
+		// Built per request: the tool schemas list the caller's categories.
+		func(r *http.Request) *mcp.Server {
+			categories, err := s.handler.CategoryNames(r.Context())
+			if err != nil {
+				categories = models.DefaultCategories
+			}
+			return s.newMcpServer(toStrings(categories))
+		},
+		&mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true},
+	)
+}
+
+// newMcpServer returns the MCP server with its tools; categories are the
+// caller's.
+func (s *Server) newMcpServer(categories []string) *mcp.Server {
 	server := mcp.NewServer(
 		&mcp.Implementation{Name: "expense-tracker", Version: s.version},
 		&mcp.ServerOptions{Instructions: mcpInstructions},
@@ -42,7 +58,7 @@ func (s *Server) NewMcpHandler() http.Handler {
 	server.AddTool(&mcp.Tool{
 		Name:        "create_expense",
 		Description: "Record a new expense. Returns the stored expense, including its id.",
-		InputSchema: objectSchema(expenseProperties(), "amount", "occurred_at", "category"),
+		InputSchema: objectSchema(expenseProperties(categories), "amount", "occurred_at", "category"),
 		Annotations: &mcp.ToolAnnotations{Title: "Create expense"},
 	}, s.mcpCreateExpense)
 
@@ -52,7 +68,7 @@ func (s *Server) NewMcpHandler() http.Handler {
 		InputSchema: objectSchema(map[string]any{
 			"date_from": map[string]any{"type": "string", "format": "date", "description": "First local date, YYYY-MM-DD (inclusive)."},
 			"date_to":   map[string]any{"type": "string", "format": "date", "description": "Last local date, YYYY-MM-DD (inclusive)."},
-			"category":  map[string]any{"type": "string", "enum": toStrings(models.Categories), "description": "Only expenses in this category."},
+			"category":  map[string]any{"type": "string", "enum": categories, "description": "Only expenses in this category."},
 			"merchant":  map[string]any{"type": "string", "maxLength": models.MaxMerchantLength, "description": `Only expenses whose merchant contains this text, ignoring case, e.g. "rewe".`},
 		}),
 		Annotations: &mcp.ToolAnnotations{Title: "List expenses", ReadOnlyHint: true},
@@ -65,7 +81,7 @@ func (s *Server) NewMcpHandler() http.Handler {
 		Annotations: &mcp.ToolAnnotations{Title: "Get expense", ReadOnlyHint: true},
 	}, s.mcpGetExpense)
 
-	updateProps := expenseProperties()
+	updateProps := expenseProperties(categories)
 	updateProps["id"] = idProperty()
 	for _, field := range []string{"merchant", "note"} {
 		p := updateProps[field].(map[string]any)
@@ -86,10 +102,7 @@ func (s *Server) NewMcpHandler() http.Handler {
 		Annotations: &mcp.ToolAnnotations{Title: "Delete expense", DestructiveHint: &destructive, IdempotentHint: true},
 	}, s.mcpDeleteExpense)
 
-	return mcp.NewStreamableHTTPHandler(
-		func(*http.Request) *mcp.Server { return server },
-		&mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true},
-	)
+	return server
 }
 
 func (s *Server) mcpCreateExpense(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -288,8 +301,9 @@ func idProperty() map[string]any {
 	return map[string]any{"type": "string", "description": "The expense id, as returned by create_expense or list_expenses."}
 }
 
-// expenseProperties describes the writable expense fields.
-func expenseProperties() map[string]any {
+// expenseProperties describes the writable expense fields; categories are
+// the caller's.
+func expenseProperties(categories []string) map[string]any {
 	return map[string]any{
 		"amount": map[string]any{
 			"type":        "string",
@@ -303,8 +317,8 @@ func expenseProperties() map[string]any {
 		},
 		"category": map[string]any{
 			"type":        "string",
-			"enum":        toStrings(models.Categories),
-			"description": `Kind of spending. "food" is eating out; "groceries" is food shopping.`,
+			"enum":        categories,
+			"description": `Kind of spending, one of the user's categories. "food" is eating out and "groceries" is food shopping, if they have them.`,
 		},
 		"merchant": map[string]any{
 			"type":        "string",

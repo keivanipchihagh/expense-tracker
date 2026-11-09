@@ -80,7 +80,9 @@ func newTestServerWith(t *testing.T, signupEnabled bool) *testServer {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { routes.ServeHTTP(w, r) }))
 	t.Cleanup(srv.Close)
 
-	h := handler.NewHandler(expenseRepo, oauthRepo, sessionRepo, userRepo, srv.URL, signupEnabled)
+	categoryRepo, err := repositories.NewCategoryRepository(ctx, db)
+	require.NoError(t, err)
+	h := handler.NewHandler(expenseRepo, oauthRepo, sessionRepo, userRepo, categoryRepo, srv.URL, signupEnabled)
 	h.SetBcryptCost(bcrypt.MinCost)
 	routes = pkgHttp.NewHttpServer(api.NewServer(h, "test", srv.URL).Handler(), 5*time.Second, 1<<20, api.RouteLimits()...).Handler
 

@@ -96,6 +96,7 @@ func (h *Handler) createUser(ctx context.Context, in SignUpInput, requireNames b
 	if err := h.userRepo.Create(ctx, user); err != nil {
 		return models.User{}, h.userRepoError(ctx, "create user failed", err)
 	}
+	h.seedCategories(ctx, user.Id)
 	return user, nil
 }
 

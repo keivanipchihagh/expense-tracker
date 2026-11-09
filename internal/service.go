@@ -66,8 +66,13 @@ func Run() {
 		fatal("failed to initialize user repository", "error", err)
 	}
 
+	categoryRepo, err := repositories.NewCategoryRepository(ctx, db)
+	if err != nil {
+		fatal("failed to initialize category repository", "error", err)
+	}
+
 	// Initialize handler and API
-	h := handler.NewHandler(expenseRepo, oauthRepo, sessionRepo, userRepo, cfg.PublicUrl, cfg.SignupEnabled)
+	h := handler.NewHandler(expenseRepo, oauthRepo, sessionRepo, userRepo, categoryRepo, cfg.PublicUrl, cfg.SignupEnabled)
 	if cfg.OpenRouterApiKey != "" {
 		h.SetReceiptScanner(receipt.NewOpenRouter(cfg.OpenRouterApiKey, cfg.OpenRouterModel).WithBaseUrl(cfg.OpenRouterBaseUrl))
 	}

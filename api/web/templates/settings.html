@@ -5,7 +5,7 @@
 <div class="page-head">
   <h1>Settings</h1>
 </div>
-{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
+{{if and .Notice (not .Section)}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
 
 {{with .Account}}
 <section class="card">
@@ -34,6 +34,42 @@
       </select>
     </label>
     <div class="form-actions"><button type="submit" class="primary">Save</button></div>
+  </form>
+</section>
+{{end}}
+
+{{with .Account}}
+<section class="card" id="categories">
+  <header class="card-head"><h2>Categories</h2><p class="muted small-text">Group your expenses your way. A category can be removed once no expense uses it.</p></header>
+  {{if eq $.Section "categories"}}
+  {{with index $errors "category"}}<p class="alert" role="alert">{{.}}</p>{{end}}
+  {{with $.Notice}}<p class="notice" role="status">{{.}}</p>{{end}}
+  {{end}}
+  {{$last := eq (len .Categories) 1}}
+  <ul class="category-chips">
+    {{range .Categories}}
+    <li class="chip">
+      <span class="chip-name">{{title (print .Name)}}</span>
+      <span class="chip-count" title="{{.Expenses}} {{if eq .Expenses 1}}expense{{else}}expenses{{end}}">{{.Expenses}}</span>
+      <form method="post" action="/settings/categories/delete">
+        <input type="hidden" name="name" value="{{.Name}}">
+        {{if gt .Expenses 0}}
+        <button type="submit" class="chip-remove" aria-label="Remove {{.Name}}" title="Used by {{.Expenses}} {{if eq .Expenses 1}}expense{{else}}expenses{{end}}, so it can't be removed" disabled>
+        {{else if $last}}
+        <button type="submit" class="chip-remove" aria-label="Remove {{.Name}}" title="You need at least one category" disabled>
+        {{else}}
+        <button type="submit" class="chip-remove" aria-label="Remove {{.Name}}" title="Remove">
+        {{end}}
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17"/></svg>
+        </button>
+      </form>
+    </li>
+    {{end}}
+  </ul>
+  <form method="post" action="/settings/categories" class="category-add">
+    <label class="sr-only" for="new-category">New category</label>
+    <input id="new-category" name="name" value="{{index $.Form "category"}}" placeholder="New category, e.g. Pets" maxlength="30" required autocomplete="off" {{if eq $.Section "categories"}}autofocus{{end}}>
+    <button type="submit">Add</button>
   </form>
 </section>
 {{end}}

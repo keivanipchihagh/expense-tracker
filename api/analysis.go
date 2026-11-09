@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"github.com/keivanipchihagh/expense-tracker/internal/handler"
 	"html/template"
 	"math"
 	"net/http"
@@ -35,7 +36,12 @@ func (s *Server) AnalysisPage(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	q := r.URL.Query()
 	period := analysisPeriodFor(q.Get("period"), now)
-	scope := parseScope(q.Get("scope"))
+	categories, err := s.handler.CategoryNames(r.Context())
+	if err != nil {
+		s.renderUiError(w, r, err)
+		return
+	}
+	scope := parseScope(q.Get("scope"), categories)
 
 	current, err := s.handler.ListExpenses(r.Context(), models.ExpenseFilter{DateFrom: period.From, DateTo: period.To})
 	if err != nil {
@@ -59,7 +65,7 @@ func (s *Server) AnalysisPage(w http.ResponseWriter, r *http.Request) {
 	s.renderSignedIn(w, r, http.StatusOK, "analysis.html", pageData{
 		Title:    "Analysis",
 		Nav:      "analysis",
-		Analysis: buildAnalysis(now, period, scope, current, previous, currency),
+		Analysis: buildAnalysis(now, period, scope, current, previous, currency, categories),
 	})
 }
 
@@ -125,12 +131,14 @@ type analysisScope struct {
 
 const scopeNoHousing = "no-housing"
 
-func parseScope(v string) analysisScope {
-	if v == scopeNoHousing {
+// parseScope reads the scope; categories are the user's, and anything else
+// means everything.
+func parseScope(v string, categories []models.Category) analysisScope {
+	if v == scopeNoHousing && models.HasCategory(categories, models.CategoryHousing) {
 		return analysisScope{Value: v, ExcludeHousing: true}
 	}
-	if c := models.Category(v); c.IsValid() {
-		return analysisScope{Value: v, Category: c}
+	if c, problem := handler.NormalizeCategory(v); problem == "" && models.HasCategory(categories, c) {
+		return analysisScope{Value: string(c), Category: c}
 	}
 	return analysisScope{}
 }
@@ -279,7 +287,8 @@ type paceHit struct {
 // buildAnalysis computes the page from the current and previous periods'
 // expenses (oldest first). Amounts are summed exactly; floats are only used
 // for chart geometry.
-func buildAnalysis(now time.Time, period analysisPeriod, scope analysisScope, current, previous []models.Expense, currency models.Currency) analysisData {
+// categories are the user's, offered as scopes.
+func buildAnalysis(now time.Time, period analysisPeriod, scope analysisScope, current, previous []models.Expense, currency models.Currency, userCategories []models.Category) analysisData {
 	current = scope.filter(current)
 	previous = scope.filter(previous)
 	symbol := currency.Symbol()
@@ -293,11 +302,11 @@ func buildAnalysis(now time.Time, period analysisPeriod, scope analysisScope, cu
 		}
 		out.Periods = append(out.Periods, periodLink{Label: p.Label, Query: template.URL(v.Encode()), Active: p.Key == period.Key})
 	}
-	out.ScopeOptions = append(out.ScopeOptions,
-		scopeOption{Value: "", Label: "All categories", Selected: scope.Value == ""},
-		scopeOption{Value: scopeNoHousing, Label: "Everything except housing", Selected: scope.ExcludeHousing},
-	)
-	for _, c := range models.Categories {
+	out.ScopeOptions = append(out.ScopeOptions, scopeOption{Value: "", Label: "All categories", Selected: scope.Value == ""})
+	if models.HasCategory(userCategories, models.CategoryHousing) {
+		out.ScopeOptions = append(out.ScopeOptions, scopeOption{Value: scopeNoHousing, Label: "Everything except housing", Selected: scope.ExcludeHousing})
+	}
+	for _, c := range userCategories {
 		out.ScopeOptions = append(out.ScopeOptions, scopeOption{Value: string(c), Label: titleCase(string(c)), Selected: scope.Category == c})
 	}
 

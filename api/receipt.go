@@ -40,7 +40,7 @@ func (s *Server) ScanReceiptSubmit(w http.ResponseWriter, r *http.Request) {
 		Symbol:      s.currencySymbol(r),
 		ScanEnabled: s.handler.ScanEnabled(),
 	}
-	render := func(status int) { s.renderPartial(w, status, "form", data) }
+	render := func(status int) { s.renderForm(w, r, status, data) }
 
 	if err := r.ParseMultipartForm(handler.MaxReceiptBytes); err != nil {
 		data.Range = filterFromExpenseForm(r.PostForm, time.Now())

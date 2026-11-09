@@ -66,20 +66,20 @@ func TestParseScope(t *testing.T) {
 	rent := spent("r", "1000", models.CategoryHousing, "", "2026-11-01T09:00:00+01:00")
 	food := spent("f", "10", models.CategoryFood, "", "2026-11-01T12:00:00+01:00")
 
-	all := parseScope("")
+	all := parseScope("", models.DefaultCategories)
 	assert.True(t, all.includes(rent) && all.includes(food))
 
-	noHousing := parseScope("no-housing")
+	noHousing := parseScope("no-housing", models.DefaultCategories)
 	assert.True(t, noHousing.ExcludeHousing)
 	assert.False(t, noHousing.includes(rent))
 	assert.True(t, noHousing.includes(food))
 
-	onlyFood := parseScope("food")
+	onlyFood := parseScope("food", models.DefaultCategories)
 	assert.Equal(t, models.CategoryFood, onlyFood.Category)
 	assert.False(t, onlyFood.includes(rent))
 	assert.True(t, onlyFood.includes(food))
 
-	assert.Equal(t, analysisScope{}, parseScope("pets"), "unknown values mean everything")
+	assert.Equal(t, analysisScope{}, parseScope("pets", models.DefaultCategories), "unknown values mean everything")
 }
 
 func TestNiceScale(t *testing.T) {
@@ -150,7 +150,7 @@ func november() (time.Time, analysisPeriod, []models.Expense, []models.Expense) 
 
 func TestBuildAnalysis_Figures(t *testing.T) {
 	now, period, current, previous := november()
-	got := buildAnalysis(now, period, analysisScope{}, current, previous, models.CurrencyEUR)
+	got := buildAnalysis(now, period, analysisScope{}, current, previous, models.CurrencyEUR, models.DefaultCategories)
 
 	assert.False(t, got.Empty)
 	assert.Equal(t, "€", got.Symbol)
@@ -170,7 +170,7 @@ func TestBuildAnalysis_Figures(t *testing.T) {
 
 func TestBuildAnalysis_Categories(t *testing.T) {
 	now, period, current, previous := november()
-	got := buildAnalysis(now, period, analysisScope{}, current, previous, models.CurrencyEUR)
+	got := buildAnalysis(now, period, analysisScope{}, current, previous, models.CurrencyEUR, models.DefaultCategories)
 
 	require.Len(t, got.Categories, 4)
 	assert.Equal(t, categoryRow{Category: "housing", Total: "1250.00", Share: 88, Length: 100, Href: "/?category=housing&from=2026-11-01&to=2026-11-30"}, got.Categories[0])
@@ -180,14 +180,14 @@ func TestBuildAnalysis_Categories(t *testing.T) {
 	assert.Equal(t, "food", got.Categories[3].Category)
 	assert.Equal(t, "41.25", got.Categories[3].Total, "lunch in Berlin and pizza in New York both count")
 
-	single := buildAnalysis(now, period, parseScope("food"), current, previous, models.CurrencyEUR)
+	single := buildAnalysis(now, period, parseScope("food", models.DefaultCategories), current, previous, models.CurrencyEUR, models.DefaultCategories)
 	assert.Nil(t, single.Categories, "one category needs no breakdown")
 	assert.Equal(t, "41.25", single.Total)
 }
 
 func TestBuildAnalysis_Merchants(t *testing.T) {
 	now, period, current, previous := november()
-	got := buildAnalysis(now, period, analysisScope{}, current, previous, models.CurrencyEUR)
+	got := buildAnalysis(now, period, analysisScope{}, current, previous, models.CurrencyEUR, models.DefaultCategories)
 
 	require.Len(t, got.Merchants, 4)
 	assert.Equal(t, merchantRow{Name: "Landlord", Count: 1, Total: "1250.00", Share: 88, Href: "/?from=2026-11-01&merchant=Landlord&to=2026-11-30"}, got.Merchants[0])
@@ -198,12 +198,12 @@ func TestBuildAnalysis_Merchants(t *testing.T) {
 	for i, name := range strings.Fields("a b c d e f g h i j") {
 		many = append(many, spent(name, "1"+strings.Repeat("0", i%3), models.CategoryOther, name, "2026-11-02T10:00:00+01:00"))
 	}
-	assert.Len(t, buildAnalysis(now, period, analysisScope{}, many, previous, models.CurrencyEUR).Merchants, topMerchants)
+	assert.Len(t, buildAnalysis(now, period, analysisScope{}, many, previous, models.CurrencyEUR, models.DefaultCategories).Merchants, topMerchants)
 }
 
 func TestBuildAnalysis_ScopeWithoutHousing(t *testing.T) {
 	now, period, current, previous := november()
-	got := buildAnalysis(now, period, parseScope("no-housing"), current, previous, models.CurrencyGBP)
+	got := buildAnalysis(now, period, parseScope("no-housing", models.DefaultCategories), current, previous, models.CurrencyGBP, models.DefaultCategories)
 
 	assert.Equal(t, "170.16", got.Total)
 	assert.Equal(t, "£", got.Symbol)
@@ -227,7 +227,7 @@ func TestBuildAnalysis_ScopeWithoutHousing(t *testing.T) {
 
 func TestBuildAnalysis_Timeline(t *testing.T) {
 	now, period, current, previous := november()
-	tl := buildAnalysis(now, period, analysisScope{}, current, previous, models.CurrencyEUR).Timeline
+	tl := buildAnalysis(now, period, analysisScope{}, current, previous, models.CurrencyEUR, models.DefaultCategories).Timeline
 
 	assert.Equal(t, "day", tl.Unit)
 	require.Len(t, tl.Buckets, 30, "every day of November, the rest still to come")
@@ -286,7 +286,7 @@ func TestBuildTimeline_Units(t *testing.T) {
 
 func TestBuildAnalysis_Pace(t *testing.T) {
 	now, period, current, previous := november()
-	p := buildAnalysis(now, period, analysisScope{}, current, previous, models.CurrencyEUR).Pace
+	p := buildAnalysis(now, period, analysisScope{}, current, previous, models.CurrencyEUR, models.DefaultCategories).Pace
 	require.NotNil(t, p)
 
 	assert.True(t, p.InProgress)
@@ -306,14 +306,14 @@ func TestBuildAnalysis_Pace(t *testing.T) {
 	assert.Equal(t, "Day 31 · 31 Oct: €1311.42", p.Hits[30].Title)
 
 	last := analysisPeriodFor("last-month", now)
-	done := buildAnalysis(now, last, analysisScope{}, previous, nil, models.CurrencyEUR)
+	done := buildAnalysis(now, last, analysisScope{}, previous, nil, models.CurrencyEUR, models.DefaultCategories)
 	assert.Nil(t, done.Pace, "nothing to compare against")
 	assert.Nil(t, done.TotalDelta)
 }
 
 func TestBuildAnalysis_TrackingStartsInsidePeriod(t *testing.T) {
 	now, _, current, _ := november()
-	got := buildAnalysis(now, analysisPeriodFor("6m", now), analysisScope{}, current, nil, models.CurrencyEUR)
+	got := buildAnalysis(now, analysisPeriodFor("6m", now), analysisScope{}, current, nil, models.CurrencyEUR, models.DefaultCategories)
 
 	assert.Equal(t, "1 Jun – 30 Nov 2026", got.RangeLabel)
 	assert.Equal(t, "1 Nov 2026", got.TrackedFrom)
@@ -326,7 +326,7 @@ func TestBuildAnalysis_TrackingStartsInsidePeriod(t *testing.T) {
 func TestBuildAnalysis_AllTime(t *testing.T) {
 	now, _, current, previous := november()
 	all := append(append([]models.Expense{}, previous...), current...)
-	got := buildAnalysis(now, analysisPeriodFor("all", now), analysisScope{}, all, nil, models.CurrencyEUR)
+	got := buildAnalysis(now, analysisPeriodFor("all", now), analysisScope{}, all, nil, models.CurrencyEUR, models.DefaultCategories)
 
 	assert.Equal(t, "1 Oct – 9 Nov 2026", got.RangeLabel, "from the first expense to today")
 	assert.Equal(t, 40, got.Days)
@@ -336,8 +336,8 @@ func TestBuildAnalysis_AllTime(t *testing.T) {
 
 func TestBuildAnalysis_Empty(t *testing.T) {
 	now, period, _, _ := november()
-	got := buildAnalysis(now, period, analysisScope{}, nil, nil, models.CurrencyEUR)
+	got := buildAnalysis(now, period, analysisScope{}, nil, nil, models.CurrencyEUR, models.DefaultCategories)
 	assert.True(t, got.Empty)
 	assert.Len(t, got.Periods, 6, "the filters still show")
-	assert.Len(t, got.ScopeOptions, 2+len(models.Categories))
+	assert.Len(t, got.ScopeOptions, 2+len(models.DefaultCategories))
 }

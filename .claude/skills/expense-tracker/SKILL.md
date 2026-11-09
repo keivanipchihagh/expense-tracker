@@ -35,7 +35,7 @@ claude mcp remove expense-tracker                                         # remo
 - `amount`: string, positive, at most 2 decimals, e.g. `"12.50"`. Ask if missing; never guess.
 - There is no currency field. Amounts are plain numbers, and the user picks one display currency in the web UI. If they mention a different currency than usual, ask before logging.
 - `occurred_at`: RFC 3339 **with the user's UTC offset**, e.g. `2026-11-07T13:20:00+01:00`. "Now" or no time given means the current local time. "Yesterday at lunch" means yesterday around 12:30. Never send a time without an offset.
-- `category`: one of `food` (eating out), `groceries`, `transport`, `housing`, `utilities`, `health`, `entertainment`, `shopping`, `travel`, `subscriptions`, `education`, `gifts`, `other`.
+- `category`: one of the user's own categories, listed in the tool schema. Everyone starts with `food` (eating out), `groceries`, `transport`, `housing`, `utilities`, `health`, `entertainment`, `shopping`, `travel`, `subscriptions`, `education`, `gifts` and `other`, and can add or remove categories in the web UI's settings.
 - `merchant`: the store or vendor if named, e.g. "Rewe".
 - `note`: only extra words the user actually said ("split with Alex"). Don't summarise, don't invent.
 

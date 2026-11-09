@@ -41,9 +41,13 @@ func (h *Handler) CreateExpense(ctx context.Context, input map[string]any) (mode
 		}
 	}
 
+	categories, err := h.CategoryNames(ctx)
+	if err != nil {
+		return models.Expense{}, err
+	}
 	now := time.Now().UTC()
 	expense := models.Expense{Id: uuid.Must(uuid.NewV7()).String(), UserId: uid, CreatedAt: now, UpdatedAt: now}
-	applyInput(&expense, input, errs)
+	applyInput(&expense, input, categories, errs)
 	if len(errs) > 0 {
 		return models.Expense{}, pkg.NewValidationError(errs)
 	}
@@ -68,8 +72,16 @@ func (h *Handler) ListExpenses(ctx context.Context, filter models.ExpenseFilter)
 	if !filter.DateFrom.IsZero() && !filter.DateTo.IsZero() && filter.DateTo.Before(filter.DateFrom) {
 		errs["date_to"] = "must not be before date_from"
 	}
-	if filter.Category != "" && !filter.Category.IsValid() {
-		errs["category"] = "must be one of " + joinValues(models.Categories)
+	if filter.Category != "" {
+		categories, err := h.CategoryNames(ctx)
+		if err != nil {
+			return nil, err
+		}
+		c, problem := NormalizeCategory(string(filter.Category))
+		if problem != "" || !models.HasCategory(categories, c) {
+			errs["category"] = categoryError(categories)
+		}
+		filter.Category = c
 	}
 	filter.Merchant = strings.TrimSpace(filter.Merchant)
 	if utf8.RuneCountInString(filter.Merchant) > models.MaxMerchantLength {
@@ -113,9 +125,13 @@ func (h *Handler) UpdateExpense(ctx context.Context, id string, patch map[string
 		return models.Expense{}, h.repoError(ctx, "update expense failed", err)
 	}
 
+	categories, err := h.CategoryNames(ctx)
+	if err != nil {
+		return models.Expense{}, err
+	}
 	errs := map[string]string{}
 	updated := current
-	applyInput(&updated, patch, errs)
+	applyInput(&updated, patch, categories, errs)
 	if len(errs) > 0 {
 		return models.Expense{}, pkg.NewValidationError(errs)
 	}
@@ -159,7 +175,9 @@ func (h *Handler) repoError(ctx context.Context, msg string, err error) error {
 // applyInput validates the keys in input and writes them onto e. Problems
 // are recorded in errs, keyed by field name. A missing key leaves the field
 // as it is; null clears an optional field and is rejected for a required one.
-func applyInput(e *models.Expense, input map[string]any, errs map[string]string) {
+// categories are the user's; a category must be one of them, compared
+// without regard to case.
+func applyInput(e *models.Expense, input map[string]any, categories []models.Category, errs map[string]string) {
 	for key, v := range input {
 		switch {
 		case !writableFields[key]:
@@ -190,10 +208,10 @@ func applyInput(e *models.Expense, input map[string]any, errs map[string]string)
 
 	if v := input["category"]; v != nil {
 		s, _ := v.(string)
-		if c := models.Category(s); c.IsValid() {
+		if c, problem := NormalizeCategory(s); problem == "" && models.HasCategory(categories, c) {
 			e.Category = c
 		} else {
-			errs["category"] = "must be one of " + joinValues(models.Categories)
+			errs["category"] = categoryError(categories)
 		}
 	}
 

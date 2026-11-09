@@ -115,7 +115,7 @@ func TestCreateExpense_Validation(t *testing.T) {
 		{name: "amount not a number", modify: func(in map[string]any) { in["amount"] = true }, want: map[string]string{"amount": `must be a decimal number or string, e.g. "12.50"`}},
 		{name: "naive timestamp", modify: func(in map[string]any) { in["occurred_at"] = "2026-11-07T13:20:00" }, want: map[string]string{"occurred_at": "must be an RFC 3339 timestamp with a UTC offset, e.g. 2026-11-07T13:20:00+01:00"}},
 		{name: "timestamp not a string", modify: func(in map[string]any) { in["occurred_at"] = json.Number("1") }, want: map[string]string{"occurred_at": "must be an RFC 3339 timestamp with a UTC offset, e.g. 2026-11-07T13:20:00+01:00"}},
-		{name: "unknown category", modify: func(in map[string]any) { in["category"] = "rent" }, want: map[string]string{"category": "must be one of " + joinValues(models.Categories)}},
+		{name: "unknown category", modify: func(in map[string]any) { in["category"] = "rent" }, want: map[string]string{"category": categoryError(models.DefaultCategories)}},
 		{name: "merchant not a string", modify: func(in map[string]any) { in["merchant"] = json.Number("5") }, want: map[string]string{"merchant": "must be a string"}},
 		{name: "merchant too long", modify: func(in map[string]any) { in["merchant"] = strings.Repeat("é", models.MaxMerchantLength+1) }, want: map[string]string{"merchant": "must be at most 200 characters"}},
 		{name: "note too long", modify: func(in map[string]any) { in["note"] = strings.Repeat("x", models.MaxNoteLength+1) }, want: map[string]string{"note": "must be at most 2000 characters"}},
@@ -215,7 +215,7 @@ func TestListExpenses(t *testing.T) {
 		})
 		assert.Equal(t, map[string]string{
 			"date_to":  "must not be before date_from",
-			"category": "must be one of " + joinValues(models.Categories),
+			"category": categoryError(models.DefaultCategories),
 			"merchant": "must be at most 200 characters",
 		}, validationFields(t, err))
 	})
@@ -315,7 +315,7 @@ func TestUpdateExpense_Validation(t *testing.T) {
 	}{
 		{name: "required field cannot be cleared", patch: map[string]any{"amount": nil, "category": nil}, want: map[string]string{"amount": "is required", "category": "is required"}},
 		{name: "unknown field", patch: map[string]any{"created_at": "2026-01-01T00:00:00Z"}, want: map[string]string{"created_at": "unknown field"}},
-		{name: "invalid category", patch: map[string]any{"category": "rent"}, want: map[string]string{"category": "must be one of " + joinValues(models.Categories)}},
+		{name: "invalid category", patch: map[string]any{"category": "rent"}, want: map[string]string{"category": categoryError(models.DefaultCategories)}},
 		{name: "new amount has at most two decimals", patch: map[string]any{"amount": "1.234"}, want: map[string]string{"amount": "must have at most 2 decimal places"}},
 		{name: "currency is no longer a field", patch: map[string]any{"currency": "USD"}, want: map[string]string{"currency": "unknown field"}},
 	}

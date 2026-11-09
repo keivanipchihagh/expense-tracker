@@ -226,7 +226,7 @@ func TestDraftFrom(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			d := draftFrom(tt.reading, now, models.CurrencyEUR)
+			d := draftFrom(tt.reading, now, models.CurrencyEUR, models.DefaultCategories)
 			tt.check(t, d)
 			assert.Equal(t, tt.warnings, d.Warnings)
 		})

@@ -57,6 +57,6 @@ func TestIsValid(t *testing.T) {
 	assert.False(t, Currency("eur").IsValid())
 	assert.False(t, Currency("").IsValid())
 
-	assert.True(t, CategoryGroceries.IsValid())
-	assert.False(t, Category("rent").IsValid())
+	assert.True(t, HasCategory(DefaultCategories, CategoryGroceries))
+	assert.False(t, HasCategory(DefaultCategories, "rent"))
 }

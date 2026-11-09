@@ -17,6 +17,7 @@ type Handler struct {
 	oauthRepo   repositories.OAuthRepository
 	sessionRepo repositories.SessionRepository
 	userRepo    repositories.UserRepository
+	categories  repositories.CategoryRepository
 	// publicUrl is the server's base URL, used as the OAuth issuer.
 	publicUrl string
 	// signupEnabled allows new accounts to be created.
@@ -40,10 +41,11 @@ func NewHandler(
 	oauthRepo repositories.OAuthRepository,
 	sessionRepo repositories.SessionRepository,
 	userRepo repositories.UserRepository,
+	categoryRepo repositories.CategoryRepository,
 	publicUrl string,
 	signupEnabled bool,
 ) *Handler {
-	if expenseRepo == nil || oauthRepo == nil || sessionRepo == nil || userRepo == nil {
+	if expenseRepo == nil || oauthRepo == nil || sessionRepo == nil || userRepo == nil || categoryRepo == nil {
 		panic("handler: repositories must not be nil")
 	}
 	if publicUrl == "" {
@@ -54,6 +56,7 @@ func NewHandler(
 		oauthRepo:     oauthRepo,
 		sessionRepo:   sessionRepo,
 		userRepo:      userRepo,
+		categories:    categoryRepo,
 		publicUrl:     strings.TrimSuffix(publicUrl, "/"),
 		signupEnabled: signupEnabled,
 		logins:        newKeyedLimiter(maxFailedLogins, failedLoginWindow),

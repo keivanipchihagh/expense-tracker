@@ -168,7 +168,7 @@ func (s *Server) ResultsPartial(w http.ResponseWriter, r *http.Request) {
 
 // NewExpenseForm handles GET /ui/expenses/new.
 func (s *Server) NewExpenseForm(w http.ResponseWriter, r *http.Request) {
-	s.renderPartial(w, http.StatusOK, "form", formData{
+	s.renderForm(w, r, http.StatusOK, formData{
 		Range:       filterFromQuery(r.URL.Query(), time.Now()),
 		Values:      formValues{Category: string(models.CategoryFood)},
 		Symbol:      s.currencySymbol(r),
@@ -183,7 +183,7 @@ func (s *Server) EditExpenseForm(w http.ResponseWriter, r *http.Request) {
 		s.renderUiError(w, r, err)
 		return
 	}
-	s.renderPartial(w, http.StatusOK, "form", formData{
+	s.renderForm(w, r, http.StatusOK, formData{
 		Id:         e.Id,
 		Range:      filterFromQuery(r.URL.Query(), time.Now()),
 		Values:     formValuesFrom(e),
@@ -284,7 +284,7 @@ func (s *Server) saveExpense(w http.ResponseWriter, r *http.Request, id string) 
 	}
 	if len(fieldErrors) > 0 {
 		// 200 so HTMX swaps the form back in with the errors.
-		s.renderPartial(w, http.StatusOK, "form", formData{
+		s.renderForm(w, r, http.StatusOK, formData{
 			Id: id, Range: rng, Values: values, Errors: fieldErrors, Symbol: s.currencySymbol(r),
 			ScanEnabled: id == "" && s.handler.ScanEnabled(),
 			// The page script puts the scanned photo back into the form.
@@ -294,6 +294,27 @@ func (s *Server) saveExpense(w http.ResponseWriter, r *http.Request, id string) 
 		return
 	}
 	s.renderSaved(w, r, rng)
+}
+
+// renderForm renders the add/edit form with the user's categories. A new
+// expense without a category (or with one the user doesn't have) starts on
+// "food" if they have it, else their first category.
+func (s *Server) renderForm(w http.ResponseWriter, r *http.Request, status int, data formData) {
+	categories, err := s.handler.CategoryNames(r.Context())
+	if err != nil {
+		s.renderUiError(w, r, err)
+		return
+	}
+	data.Categories = toStrings(categories)
+	if data.Id == "" && !models.HasCategory(categories, models.Category(data.Values.Category)) {
+		data.Values.Category = ""
+		if models.HasCategory(categories, models.CategoryFood) {
+			data.Values.Category = string(models.CategoryFood)
+		} else if len(categories) > 0 {
+			data.Values.Category = string(categories[0])
+		}
+	}
+	s.renderPartial(w, status, "form", data)
 }
 
 // uploadedFile returns the bytes of the named file field, or nil if none
@@ -431,6 +452,14 @@ func sameOrigin(r *http.Request) bool {
 }
 
 func (s *Server) results(r *http.Request, filter listFilter) (resultsData, error) {
+	categories, err := s.handler.CategoryNames(r.Context())
+	if err != nil {
+		return resultsData{}, err
+	}
+	// A category the user doesn't have doesn't filter.
+	if !models.HasCategory(categories, models.Category(filter.Category)) {
+		filter.Category = ""
+	}
 	from, _ := time.Parse(time.DateOnly, filter.From)
 	to, _ := time.Parse(time.DateOnly, filter.To)
 	expenses, err := s.handler.ListExpenses(r.Context(), models.ExpenseFilter{
@@ -456,6 +485,7 @@ func (s *Server) results(r *http.Request, filter listFilter) (resultsData, error
 			day.Rows[i].HasReceipt = receipts[day.Rows[i].Id]
 		}
 	}
+	results.CategoryOptions = toStrings(categories)
 	results.Filter = filter
 	results.Presets = presets(time.Now(), filter.dateRange)
 	for i := range results.Presets {
@@ -516,6 +546,9 @@ type pageData struct {
 	Errors map[string]string
 	// Notice is a success message, e.g. "Saved."
 	Notice string
+	// Section is the part of the page a form was sent from; its messages
+	// are shown there and it gets the focus (so the browser scrolls to it).
+	Section string
 	// Account is the signed-in user on the account page.
 	Account *accountView
 }
@@ -626,7 +659,7 @@ type listFilter struct {
 // the merchant length limit.
 func filterFromQuery(v url.Values, now time.Time) listFilter {
 	f := listFilter{dateRange: rangeFromQuery(v, now)}
-	if c := models.Category(v.Get("category")); c.IsValid() {
+	if c, problem := handler.NormalizeCategory(v.Get("category")); problem == "" {
 		f.Category = string(c)
 	}
 	f.Merchant = strings.TrimSpace(v.Get("merchant"))
@@ -706,6 +739,8 @@ type resultsData struct {
 	// Currency is the display currency; Symbol is its symbol, e.g. "€".
 	Currency models.Currency
 	Symbol   string
+	// CategoryOptions are the user's categories, for the filter.
+	CategoryOptions []string
 }
 
 // dayGroup is the expenses of one local date, newest first.
@@ -828,13 +863,9 @@ type formData struct {
 	ScanWarnings []string
 	// HasReceipt shows the kept receipt when editing, with a way to remove it.
 	HasReceipt bool
+	// Categories are the user's, for the select box (see renderForm).
+	Categories []string
 }
-
-// Categories feeds the form's category select box.
-func (formData) Categories() []string { return toStrings(models.Categories) }
-
-// CategoryOptions feeds the category filter's select box.
-func (resultsData) CategoryOptions() []string { return toStrings(models.Categories) }
 
 func toStrings[T ~string](values []T) []string {
 	out := make([]string, len(values))

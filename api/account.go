@@ -17,6 +17,8 @@ import (
 // shown but can't be changed.
 type accountView struct {
 	Email, FirstName, LastName, Currency string
+	// Categories are the user's, with how many expenses use each.
+	Categories []models.CategoryUsage
 }
 
 // currencyOption is one entry of the display currency select box. Label
@@ -203,7 +205,12 @@ func (s *Server) renderAccount(w http.ResponseWriter, r *http.Request, status in
 		s.renderUiError(w, r, err)
 		return
 	}
-	view := accountView{Email: user.Email, FirstName: user.FirstName, LastName: user.LastName, Currency: string(user.Currency)}
+	categories, err := s.handler.Categories(r.Context())
+	if err != nil {
+		s.renderUiError(w, r, err)
+		return
+	}
+	view := accountView{Email: user.Email, FirstName: user.FirstName, LastName: user.LastName, Currency: string(user.Currency), Categories: categories}
 	// After a rejected change, show what was typed rather than what's saved.
 	if v, ok := data.Form["first_name"]; ok {
 		view.FirstName = v

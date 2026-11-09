@@ -84,8 +84,12 @@ func (h *Handler) ScanReceipt(ctx context.Context, image []byte) (ReceiptDraft, 
 	if err != nil {
 		return ReceiptDraft{}, err
 	}
+	categories, err := h.CategoryNames(ctx)
+	if err != nil {
+		return ReceiptDraft{}, err
+	}
 	started := time.Now()
-	reading, err := h.scanner.Scan(ctx, image, mimeType, now, toStrings(models.Categories))
+	reading, err := h.scanner.Scan(ctx, image, mimeType, now, toStrings(categories))
 	if err != nil {
 		if scanErr, ok := errors.AsType[*receipt.Error](err); ok {
 			h.logger.WarnContext(ctx, "receipt scan failed", "user_id", uid, "error", err)
@@ -102,7 +106,7 @@ func (h *Handler) ScanReceipt(ctx context.Context, image []byte) (ReceiptDraft, 
 	if !reading.IsReceipt {
 		return ReceiptDraft{}, &pkg.Error{Status: http.StatusUnprocessableEntity, Code: "not_a_receipt", Message: "That doesn't look like a receipt. Try a clearer photo of the whole receipt."}
 	}
-	return draftFrom(reading, now, currency), nil
+	return draftFrom(reading, now, currency, categories), nil
 }
 
 // CheckReceiptImage returns the image's type, sniffed from its bytes (not
@@ -189,8 +193,13 @@ func (h *Handler) ReceiptIds(ctx context.Context) (map[string]bool, error) {
 }
 
 // draftFrom validates what the model read.
-func draftFrom(r receipt.Reading, now time.Time, display models.Currency) ReceiptDraft {
-	d := ReceiptDraft{Category: models.CategoryOther}
+// categories are the user's; the draft's category is one of them: what the
+// model picked, else "other" if they have it, else none.
+func draftFrom(r receipt.Reading, now time.Time, display models.Currency, categories []models.Category) ReceiptDraft {
+	d := ReceiptDraft{}
+	if models.HasCategory(categories, models.CategoryOther) {
+		d.Category = models.CategoryOther
+	}
 	warn := func(s string) { d.Warnings = append(d.Warnings, s) }
 
 	if amount, ok := parseReceiptAmount(r.Amount); ok {
@@ -220,7 +229,7 @@ func draftFrom(r receipt.Reading, now time.Time, display models.Currency) Receip
 		warn("Couldn't read the date. It's set to now.")
 	}
 
-	if c := models.Category(strings.ToLower(strings.TrimSpace(r.Category))); c.IsValid() {
+	if c, problem := NormalizeCategory(r.Category); problem == "" && models.HasCategory(categories, c) {
 		d.Category = c
 	}
 	d.Merchant = cleanText(r.Merchant, models.MaxMerchantLength)
