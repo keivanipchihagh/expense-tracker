@@ -258,6 +258,17 @@ input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible
 .row-amount { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .row-actions { display: flex; gap: 2px; }
 
+/* Expense rows are compact: two lines at most, the note shares the meta line. */
+.days .day { margin: 18px 0 4px; }
+.days .rows { padding: 3px; }
+.days .row { gap: 10px; padding: 6px 8px; }
+.days .avatar { width: 28px; height: 28px; border-radius: 8px; font-size: .8rem; }
+.days .row-title { line-height: 1.35; }
+.days .row-meta { font-size: .8rem; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.days .row-note { font-size: inherit; }
+.days button.icon { width: 28px; height: 28px; }
+.days button.icon svg { width: 16px; height: 16px; }
+
 @media (hover: hover) {
   .row-actions { opacity: 0; transition: opacity .15s; }
   .row:hover .row-actions, .row:focus-within .row-actions { opacity: 1; }
