@@ -35,6 +35,16 @@ const uiCsp = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 
 // templateFuncs are available in every template.
 var templateFuncs = template.FuncMap{
 	// title upper-cases the first letter: "groceries" → "Groceries".
+	// dict builds a map from key/value pairs, to pass several values to a
+	// sub-template: {{template "x" (dict "A" .A "B" $.B)}}.
+	"dict": func(pairs ...any) map[string]any {
+		m := make(map[string]any, len(pairs)/2)
+		for i := 0; i+1 < len(pairs); i += 2 {
+			key, _ := pairs[i].(string)
+			m[key] = pairs[i+1]
+		}
+		return m
+	},
 	"title": func(s string) string {
 		if s == "" {
 			return s
@@ -599,6 +609,27 @@ type summaryTotal struct {
 	Categories []categoryTotal
 }
 
+// shownCategories is how many categories the summary lists before folding
+// the rest behind "Show more". Folding a single category saves nothing, so
+// up to one more than this is shown in full.
+const shownCategories = 5
+
+// Top is the categories listed up front, largest first.
+func (s summaryTotal) Top() []categoryTotal {
+	if len(s.Categories) <= shownCategories+1 {
+		return s.Categories
+	}
+	return s.Categories[:shownCategories]
+}
+
+// Rest is the categories folded behind "Show more".
+func (s summaryTotal) Rest() []categoryTotal {
+	if len(s.Categories) <= shownCategories+1 {
+		return nil
+	}
+	return s.Categories[shownCategories:]
+}
+
 type categoryTotal struct {
 	Category string
 	Total    string
@@ -647,7 +678,8 @@ func buildResults(rng dateRange, expenses []models.Expense, currency models.Curr
 	for cat, sum := range categories {
 		pct := 0
 		if total.IsPositive() {
-			pct = int(sum.Div(total).Mul(decimal.NewFromInt(100)).Round(0).IntPart())
+			// At least 1, so a small category still shows a sliver of bar.
+			pct = max(int(sum.Div(total).Mul(decimal.NewFromInt(100)).Round(0).IntPart()), 1)
 		}
 		summary.Categories = append(summary.Categories, categoryTotal{Category: cat, Total: sum.StringFixed(2), Percent: pct})
 	}

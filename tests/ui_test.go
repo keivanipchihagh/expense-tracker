@@ -219,6 +219,7 @@ func TestUI_TotalsOnPage(t *testing.T) {
 	assert.NotContains(t, page, "$7.25", "everything is shown in the display currency")
 	assert.NotContains(t, page, "99.00", "October is outside the range")
 	assert.Contains(t, page, `value="63"`, "groceries is 63% of spending")
+	assert.NotContains(t, page, "breakdown-more", "three categories need no folding")
 }
 
 func TestUI_Filters(t *testing.T) {

@@ -231,9 +231,15 @@ input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible
 .summary-item { padding: 20px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
 .summary-label { color: var(--muted); font-size: .85rem; }
 .summary-amount { font-size: 2.25rem; font-weight: 650; letter-spacing: -0.03em; line-height: 1.2; margin: 2px 0; font-variant-numeric: tabular-nums; }
-.breakdown { list-style: none; margin: 16px 0 0; padding: 0; display: grid; gap: 8px; font-size: .875rem; }
-.breakdown li { display: grid; grid-template-columns: 96px 1fr auto; gap: 10px; align-items: center; }
-.breakdown .num { color: var(--muted); font-variant-numeric: tabular-nums; }
+.breakdown { list-style: none; margin: 14px 0 0; padding: 0; display: grid; gap: 4px; font-size: .85rem; }
+/* A fixed amount column keeps every bar the same length. */
+.breakdown li { display: grid; grid-template-columns: 100px 1fr 88px; gap: 10px; align-items: center; }
+.breakdown .num { color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
+.breakdown-more > .breakdown { margin-top: 4px; }
+.breakdown-more summary { list-style: none; width: fit-content; margin-top: 8px; cursor: pointer; color: var(--muted); font-size: .8rem; }
+.breakdown-more summary::-webkit-details-marker { display: none; }
+.breakdown-more summary:hover { color: var(--text); }
+.breakdown-more[open] .when-closed, .breakdown-more:not([open]) .when-open { display: none; }
 .bar { width: 100%; height: 4px; appearance: none; border: 0; border-radius: 2px; background: var(--subtle); }
 .bar::-webkit-meter-bar { height: 4px; border: 0; border-radius: 2px; background: var(--subtle); }
 .bar::-webkit-meter-optimum-value { border-radius: 2px; background: var(--bar); }

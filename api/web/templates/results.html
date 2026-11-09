@@ -57,14 +57,16 @@
     <p class="summary-amount">{{$.Symbol}}{{.Total}}</p>
     <p class="muted small-text">{{.Count}} expense{{if ne .Count 1}}s{{end}}</p>
     <ul class="breakdown">
-      {{range .Categories}}
-      <li>
-        <span class="cat">{{.Category}}</span>
-        <meter class="bar" min="0" max="100" value="{{.Percent}}" aria-hidden="true"></meter>
-        <span class="num">{{$.Symbol}}{{.Total}}</span>
-      </li>
-      {{end}}
+      {{range .Top}}{{template "breakdown-row" (dict "Row" . "Symbol" $.Symbol)}}{{end}}
     </ul>
+    {{with .Rest}}
+    <details class="breakdown-more">
+      <summary><span class="when-closed">Show {{len .}} more</span><span class="when-open">Show less</span></summary>
+      <ul class="breakdown">
+        {{range .}}{{template "breakdown-row" (dict "Row" . "Symbol" $.Symbol)}}{{end}}
+      </ul>
+    </details>
+    {{end}}
   </article>
 </section>
 {{end}}
@@ -109,4 +111,12 @@
   {{end}}
 </div>
 {{end}}
+{{end}}
+
+{{define "breakdown-row"}}
+<li title="{{title .Row.Category}}: {{.Symbol}}{{.Row.Total}} ({{.Row.Percent}}%)">
+  <span class="cat">{{.Row.Category}}</span>
+  <meter class="bar" min="0" max="100" value="{{.Row.Percent}}" aria-hidden="true"></meter>
+  <span class="num">{{.Symbol}}{{.Row.Total}}</span>
+</li>
 {{end}}

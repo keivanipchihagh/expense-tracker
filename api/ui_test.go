@@ -163,3 +163,35 @@ func TestIsPublicPath(t *testing.T) {
 		assert.Equal(t, want, IsPublicPath(path), path)
 	}
 }
+
+func TestSummaryTotal_TopAndRest(t *testing.T) {
+	rows := func(n int) []categoryTotal {
+		out := make([]categoryTotal, n)
+		for i := range out {
+			out[i] = categoryTotal{Category: string(rune('a' + i))}
+		}
+		return out
+	}
+
+	few := summaryTotal{Categories: rows(5)}
+	assert.Len(t, few.Top(), 5)
+	assert.Nil(t, few.Rest())
+
+	six := summaryTotal{Categories: rows(6)}
+	assert.Len(t, six.Top(), 6, "folding a single category saves nothing")
+	assert.Nil(t, six.Rest())
+
+	many := summaryTotal{Categories: rows(12)}
+	assert.Len(t, many.Top(), 5)
+	assert.Len(t, many.Rest(), 7)
+	assert.Equal(t, "f", many.Rest()[0].Category, "the rest continues in order")
+}
+
+func TestBuildResults_SmallCategoriesStillShow(t *testing.T) {
+	got := buildResults(dateRange{}, []models.Expense{
+		expenseAt("rent", "2500.00", models.CategoryHousing, "2026-11-01T09:00:00+01:00"),
+		expenseAt("dm", "1.20", models.CategoryHealth, "2026-11-02T09:00:00+01:00"),
+	}, models.CurrencyEUR)
+	require.Len(t, got.Summary.Categories, 2)
+	assert.Equal(t, 1, got.Summary.Categories[1].Percent, "0.05% still gets a sliver of bar")
+}
