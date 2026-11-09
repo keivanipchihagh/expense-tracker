@@ -24,17 +24,19 @@ var ErrExpenseNotFound = errors.New("expense not found")
 type ExpenseRepository interface {
 	// Create inserts the expense and its create log in one transaction.
 	Create(ctx context.Context, expense models.Expense) error
-	// Get returns the expense with the given id, or ErrExpenseNotFound.
-	Get(ctx context.Context, id string) (models.Expense, error)
-	// List returns expenses matching the filter, oldest first. The dates
-	// bound the local date (the date part of occurred_at).
-	List(ctx context.Context, filter models.ExpenseFilter) ([]models.Expense, error)
-	// Update overwrites every column except id and created_at and writes an
-	// update log in one transaction. Returns ErrExpenseNotFound if missing.
+	// Get returns the user's expense with the given id, or
+	// ErrExpenseNotFound (also when it belongs to someone else).
+	Get(ctx context.Context, userId, id string) (models.Expense, error)
+	// List returns the user's expenses matching the filter, oldest first.
+	// The dates bound the local date (the date part of occurred_at).
+	List(ctx context.Context, userId string, filter models.ExpenseFilter) ([]models.Expense, error)
+	// Update overwrites every column except id, user_id and created_at and
+	// writes an update log in one transaction. Returns ErrExpenseNotFound if
+	// the expense is missing or not expense.UserId's.
 	Update(ctx context.Context, expense models.Expense) error
-	// Delete removes the expense and writes a delete log in one transaction.
-	// Returns ErrExpenseNotFound if missing.
-	Delete(ctx context.Context, id string) error
+	// Delete removes the user's expense and writes a delete log in one
+	// transaction. Returns ErrExpenseNotFound if missing or someone else's.
+	Delete(ctx context.Context, userId, id string) error
 }
 
 type ExpenseRepositoryImpl struct {
@@ -45,6 +47,7 @@ type ExpenseRepositoryImpl struct {
 const expenseTableSchema = `
 	CREATE TABLE IF NOT EXISTS expenses (
 		id             TEXT     PRIMARY KEY,
+		user_id        TEXT,
 		amount         TEXT     NOT NULL,
 		occurred_at    DATETIME NOT NULL,
 		category       TEXT     NOT NULL,
@@ -60,7 +63,7 @@ const expenseIndexSchema = `CREATE INDEX IF NOT EXISTS expenses_occurred_at ON e
 // expenseSelect reads every column. Timestamps are cast to TEXT so the driver
 // returns them exactly as stored instead of converting them to time.Time.
 const expenseSelect = `
-	SELECT id, amount, CAST(occurred_at AS TEXT), category, merchant, note,
+	SELECT id, user_id, amount, CAST(occurred_at AS TEXT), category, merchant, note,
 	       CAST(created_at AS TEXT), CAST(updated_at AS TEXT)
 	FROM expenses
 `
@@ -77,6 +80,11 @@ func NewExpenseRepository(ctx context.Context, client *sqlite.Client, logRepo Lo
 		}
 	}
 	if err := dropCurrencyColumn(ctx, client); err != nil {
+		return nil, err
+	}
+	// Expenses from before accounts stay until an owner is assigned
+	// (see AssignUnowned); nobody can see them meanwhile.
+	if err := addUserIdColumn(ctx, client, "expenses", false); err != nil {
 		return nil, err
 	}
 	return &ExpenseRepositoryImpl{client: client, logRepo: logRepo}, nil
@@ -108,13 +116,14 @@ func (r *ExpenseRepositoryImpl) Create(ctx context.Context, expense models.Expen
 	}
 
 	query := `
-		INSERT INTO expenses (id, amount, occurred_at, category, merchant, note,
+		INSERT INTO expenses (id, user_id, amount, occurred_at, category, merchant, note,
 		                      created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	return r.client.WithTx(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, query,
 			expense.Id,
+			expense.UserId,
 			expense.Amount,
 			formatTime(expense.OccurredAt),
 			string(expense.Category),
@@ -126,20 +135,20 @@ func (r *ExpenseRepositoryImpl) Create(ctx context.Context, expense models.Expen
 		if err != nil {
 			return fmt.Errorf("insert expense: %w", err)
 		}
-		return r.logRepo.Create(ctx, tx, *models.NewLog(expense.Id, models.LogActionCreate, nil, after))
+		return r.logRepo.Create(ctx, tx, *models.NewLog(expense.Id, expense.UserId, models.LogActionCreate, nil, after))
 	})
 }
 
-func (r *ExpenseRepositoryImpl) Get(ctx context.Context, id string) (models.Expense, error) {
-	return r.get(ctx, r.client, id)
+func (r *ExpenseRepositoryImpl) Get(ctx context.Context, userId, id string) (models.Expense, error) {
+	return r.get(ctx, r.client, userId, id)
 }
 
-func (r *ExpenseRepositoryImpl) List(ctx context.Context, filter models.ExpenseFilter) ([]models.Expense, error) {
+func (r *ExpenseRepositoryImpl) List(ctx context.Context, userId string, filter models.ExpenseFilter) ([]models.Expense, error) {
 	// occurred_at is stored as RFC 3339 text in its original offset, so it
 	// starts with the local date and plain string comparison filters by local
 	// date (and can use the index).
-	query := expenseSelect + " WHERE 1 = 1"
-	var args []any
+	query := expenseSelect + " WHERE user_id = ?"
+	args := []any{userId}
 	if !filter.DateFrom.IsZero() {
 		query += " AND occurred_at >= ?"
 		args = append(args, filter.DateFrom.Format(time.DateOnly))
@@ -191,10 +200,10 @@ func (r *ExpenseRepositoryImpl) Update(ctx context.Context, expense models.Expen
 		UPDATE expenses
 		SET amount = ?, occurred_at = ?, category = ?, merchant = ?,
 		    note = ?, updated_at = ?
-		WHERE id = ?
+		WHERE id = ? AND user_id = ?
 	`
 	return r.client.WithTx(ctx, func(tx *sql.Tx) error {
-		current, err := r.get(ctx, tx, expense.Id)
+		current, err := r.get(ctx, tx, expense.UserId, expense.Id)
 		if err != nil {
 			return err
 		}
@@ -211,17 +220,18 @@ func (r *ExpenseRepositoryImpl) Update(ctx context.Context, expense models.Expen
 			expense.Note,
 			formatTime(expense.UpdatedAt.UTC()),
 			expense.Id,
+			expense.UserId,
 		)
 		if err != nil {
 			return fmt.Errorf("update expense: %w", err)
 		}
-		return r.logRepo.Create(ctx, tx, *models.NewLog(expense.Id, models.LogActionUpdate, before, after))
+		return r.logRepo.Create(ctx, tx, *models.NewLog(expense.Id, expense.UserId, models.LogActionUpdate, before, after))
 	})
 }
 
-func (r *ExpenseRepositoryImpl) Delete(ctx context.Context, id string) error {
+func (r *ExpenseRepositoryImpl) Delete(ctx context.Context, userId, id string) error {
 	return r.client.WithTx(ctx, func(tx *sql.Tx) error {
-		current, err := r.get(ctx, tx, id)
+		current, err := r.get(ctx, tx, userId, id)
 		if err != nil {
 			return err
 		}
@@ -230,15 +240,15 @@ func (r *ExpenseRepositoryImpl) Delete(ctx context.Context, id string) error {
 			return fmt.Errorf("snapshot expense: %w", err)
 		}
 
-		if _, err := tx.ExecContext(ctx, "DELETE FROM expenses WHERE id = ?", id); err != nil {
+		if _, err := tx.ExecContext(ctx, "DELETE FROM expenses WHERE id = ? AND user_id = ?", id, userId); err != nil {
 			return fmt.Errorf("delete expense: %w", err)
 		}
-		return r.logRepo.Create(ctx, tx, *models.NewLog(id, models.LogActionDelete, before, nil))
+		return r.logRepo.Create(ctx, tx, *models.NewLog(id, userId, models.LogActionDelete, before, nil))
 	})
 }
 
-func (r *ExpenseRepositoryImpl) get(ctx context.Context, exec sqlite.Executor, id string) (models.Expense, error) {
-	e, err := scanExpense(exec.QueryRowContext(ctx, expenseSelect+" WHERE id = ?", id))
+func (r *ExpenseRepositoryImpl) get(ctx context.Context, exec sqlite.Executor, userId, id string) (models.Expense, error) {
+	e, err := scanExpense(exec.QueryRowContext(ctx, expenseSelect+" WHERE id = ? AND user_id = ?", id, userId))
 	if errors.Is(err, sql.ErrNoRows) {
 		return models.Expense{}, ErrExpenseNotFound
 	}
@@ -257,7 +267,7 @@ func scanExpense(s scanner) (models.Expense, error) {
 		occurredAt, createdAt, updatedAt string
 		merchant, note                   sql.NullString
 	)
-	err := s.Scan(&e.Id, &e.Amount, &occurredAt, &category,
+	err := s.Scan(&e.Id, &e.UserId, &e.Amount, &occurredAt, &category,
 		&merchant, &note, &createdAt, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return models.Expense{}, err

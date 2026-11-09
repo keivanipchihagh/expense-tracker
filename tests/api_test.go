@@ -24,9 +24,12 @@ import (
 	"github.com/keivanipchihagh/expense-tracker/pkg/repositories"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/bcrypt"
 )
 
 const (
+	// Every test server starts with this account (see newTestServer).
+	email       = "alice@example.com"
 	password    = "correct-horse-battery-staple"
 	redirectUri = "http://localhost:9999/callback"
 	verifier    = "test-verifier-0123456789-abcdefghijklmnopqrstuvwxyz"
@@ -35,7 +38,10 @@ const (
 type testServer struct {
 	url   string
 	db    *sqlite.Client
+	h     *handler.Handler
 	token string // access token used by call
+	// email and password sign in through login and the UI helpers.
+	email, password string
 }
 
 // noRedirect returns redirect responses instead of following them, so the
@@ -45,6 +51,12 @@ var noRedirect = &http.Client{
 }
 
 func newTestServer(t *testing.T) *testServer {
+	t.Helper()
+	return newTestServerWith(t, true)
+}
+
+// newTestServerWith starts a server with sign-up on or off.
+func newTestServerWith(t *testing.T, signupEnabled bool) *testServer {
 	t.Helper()
 	ctx := context.Background()
 
@@ -60,7 +72,7 @@ func newTestServer(t *testing.T) *testServer {
 	require.NoError(t, err)
 	sessionRepo, err := repositories.NewSessionRepository(ctx, db)
 	require.NoError(t, err)
-	settingRepo, err := repositories.NewSettingRepository(ctx, db)
+	userRepo, err := repositories.NewUserRepository(ctx, db)
 	require.NoError(t, err)
 
 	// The public URL is the test server's own address, known only once it runs.
@@ -68,10 +80,30 @@ func newTestServer(t *testing.T) *testServer {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { routes.ServeHTTP(w, r) }))
 	t.Cleanup(srv.Close)
 
-	h := handler.NewHandler(expenseRepo, oauthRepo, sessionRepo, settingRepo, srv.URL, password)
+	h := handler.NewHandler(expenseRepo, oauthRepo, sessionRepo, userRepo, srv.URL, signupEnabled)
+	h.SetBcryptCost(bcrypt.MinCost)
 	routes = pkgHttp.NewHttpServer(api.NewServer(h, "test", srv.URL).Handler(), 5*time.Second, 1<<20).Handler
 
-	return &testServer{url: srv.URL, db: db}
+	s := &testServer{url: srv.URL, db: db, h: h, email: email, password: password}
+	s.addUser(t, email, password)
+	return s
+}
+
+// addUser creates an account directly, like sign-up would.
+func (s *testServer) addUser(t *testing.T, email, password string) {
+	t.Helper()
+	_, err := s.h.EnsureOwner(context.Background(), handler.SignUpInput{Email: email, Password: password})
+	require.NoError(t, err)
+}
+
+// as returns a view of the server signed in as another account: its own
+// OAuth token for call, and its email for the UI helpers.
+func (s *testServer) as(t *testing.T, email, password string) *testServer {
+	t.Helper()
+	s.addUser(t, email, password)
+	other := &testServer{url: s.url, db: s.db, h: s.h, email: email, password: password}
+	other.login(t)
+	return other
 }
 
 func challenge(v string) string {
@@ -119,7 +151,8 @@ func authorizeParams(clientId string) url.Values {
 func (s *testServer) authorize(t *testing.T, clientId string) string {
 	t.Helper()
 	form := authorizeParams(clientId)
-	form.Set("password", password)
+	form.Set("email", s.email)
+	form.Set("password", s.password)
 
 	resp, err := noRedirect.PostForm(s.url+"/oauth/authorize", form)
 	require.NoError(t, err)
@@ -258,13 +291,15 @@ func TestOAuthFlow(t *testing.T) {
 
 	// A wrong password shows the form again.
 	form := authorizeParams(clientId)
+	form.Set("email", email)
 	form.Set("password", "wrong")
 	resp, err = noRedirect.PostForm(s.url+"/oauth/authorize", form)
 	require.NoError(t, err)
 	page, _ = io.ReadAll(resp.Body)
 	resp.Body.Close()
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
-	assert.Contains(t, string(page), "Wrong password")
+	assert.Contains(t, string(page), "Wrong email or password")
+	assert.Contains(t, string(page), `value="alice@example.com"`, "the email is kept")
 
 	// The right password yields a code, which is exchanged once for tokens.
 	code := s.authorize(t, clientId)

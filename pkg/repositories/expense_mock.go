@@ -56,47 +56,47 @@ func (mr *MockExpenseRepositoryMockRecorder) Create(ctx, expense any) *gomock.Ca
 }
 
 // Delete mocks base method.
-func (m *MockExpenseRepository) Delete(ctx context.Context, id string) error {
+func (m *MockExpenseRepository) Delete(ctx context.Context, userId, id string) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Delete", ctx, id)
+	ret := m.ctrl.Call(m, "Delete", ctx, userId, id)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // Delete indicates an expected call of Delete.
-func (mr *MockExpenseRepositoryMockRecorder) Delete(ctx, id any) *gomock.Call {
+func (mr *MockExpenseRepositoryMockRecorder) Delete(ctx, userId, id any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Delete", reflect.TypeOf((*MockExpenseRepository)(nil).Delete), ctx, id)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Delete", reflect.TypeOf((*MockExpenseRepository)(nil).Delete), ctx, userId, id)
 }
 
 // Get mocks base method.
-func (m *MockExpenseRepository) Get(ctx context.Context, id string) (models.Expense, error) {
+func (m *MockExpenseRepository) Get(ctx context.Context, userId, id string) (models.Expense, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Get", ctx, id)
+	ret := m.ctrl.Call(m, "Get", ctx, userId, id)
 	ret0, _ := ret[0].(models.Expense)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // Get indicates an expected call of Get.
-func (mr *MockExpenseRepositoryMockRecorder) Get(ctx, id any) *gomock.Call {
+func (mr *MockExpenseRepositoryMockRecorder) Get(ctx, userId, id any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Get", reflect.TypeOf((*MockExpenseRepository)(nil).Get), ctx, id)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Get", reflect.TypeOf((*MockExpenseRepository)(nil).Get), ctx, userId, id)
 }
 
 // List mocks base method.
-func (m *MockExpenseRepository) List(ctx context.Context, filter models.ExpenseFilter) ([]models.Expense, error) {
+func (m *MockExpenseRepository) List(ctx context.Context, userId string, filter models.ExpenseFilter) ([]models.Expense, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "List", ctx, filter)
+	ret := m.ctrl.Call(m, "List", ctx, userId, filter)
 	ret0, _ := ret[0].([]models.Expense)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // List indicates an expected call of List.
-func (mr *MockExpenseRepositoryMockRecorder) List(ctx, filter any) *gomock.Call {
+func (mr *MockExpenseRepositoryMockRecorder) List(ctx, userId, filter any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "List", reflect.TypeOf((*MockExpenseRepository)(nil).List), ctx, filter)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "List", reflect.TypeOf((*MockExpenseRepository)(nil).List), ctx, userId, filter)
 }
 
 // Update mocks base method.

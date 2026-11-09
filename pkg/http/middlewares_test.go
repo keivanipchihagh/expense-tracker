@@ -3,6 +3,7 @@ package http
 import (
 	"context"
 	"errors"
+	"github.com/keivanipchihagh/expense-tracker/pkg"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -122,14 +123,14 @@ func TestMaxBodyBytesMiddleware(t *testing.T) {
 
 func TestBearerAuthMiddleware(t *testing.T) {
 	const metadata = "https://expenses.example.com/.well-known/oauth-protected-resource"
-	validate := func(_ context.Context, token string) (bool, error) {
+	validate := func(_ context.Context, token string) (string, bool, error) {
 		switch token {
 		case "good":
-			return true, nil
+			return "user-1", true, nil
 		case "broken":
-			return false, errors.New("db down")
+			return "", false, errors.New("db down")
 		}
-		return false, nil
+		return "", false, nil
 	}
 	isPublic := func(path string) bool { return path == "/health" }
 	mw := BearerAuthMiddleware(validate, isPublic, func(*http.Request) string { return metadata })
@@ -158,9 +159,13 @@ func TestBearerAuthMiddleware(t *testing.T) {
 				req.Header.Set("Authorization", tt.authorization)
 			}
 			rec := httptest.NewRecorder()
-			mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})).ServeHTTP(rec, req)
+			var seenUser string
+			mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { seenUser = pkg.UserIdFrom(r.Context()) })).ServeHTTP(rec, req)
 
 			assert.Equal(t, tt.wantStatus, rec.Code)
+			if tt.authorization != "" && tt.wantStatus == http.StatusOK {
+				assert.Equal(t, "user-1", seenUser, "the token's user is passed downstream")
+			}
 			assert.Equal(t, tt.wantChallenge, rec.Header().Get("WWW-Authenticate"))
 			if tt.wantStatus == http.StatusUnauthorized {
 				assert.JSONEq(t, unauthorizedBody, rec.Body.String())

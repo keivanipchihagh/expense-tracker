@@ -32,6 +32,7 @@ func storedExpense() models.Expense {
 	created := time.Date(2026, 11, 7, 12, 21, 0, 0, time.UTC)
 	return models.Expense{
 		Id:         "0193f2a1-0000-7000-8000-000000000001",
+		UserId:     testUserId,
 		Amount:     "12.50",
 		OccurredAt: time.Date(2026, 11, 7, 13, 20, 0, 0, time.FixedZone("", 3600)),
 		Category:   models.CategoryFood,
@@ -61,7 +62,7 @@ func TestCreateExpense_Success(t *testing.T) {
 	ts.expenseRepo.EXPECT().Create(gomock.Any(), gomock.Any()).
 		DoAndReturn(func(_ context.Context, e models.Expense) error { stored = e; return nil })
 
-	got, err := ts.handler.CreateExpense(context.Background(), input)
+	got, err := ts.handler.CreateExpense(userCtx, input)
 	require.NoError(t, err)
 	assert.Equal(t, stored, got, "returns exactly what was stored")
 
@@ -86,7 +87,7 @@ func TestCreateExpense_OptionalFieldsDefaultToNil(t *testing.T) {
 	input["merchant"] = nil
 	input["note"] = "   "
 
-	got, err := ts.handler.CreateExpense(context.Background(), input)
+	got, err := ts.handler.CreateExpense(userCtx, input)
 	require.NoError(t, err)
 	assert.Nil(t, got.Merchant, "null means no value")
 	assert.Nil(t, got.Note, "a blank string means no value")
@@ -127,7 +128,7 @@ func TestCreateExpense_Validation(t *testing.T) {
 			input := validInput()
 			tt.modify(input)
 
-			_, err := ts.handler.CreateExpense(context.Background(), input)
+			_, err := ts.handler.CreateExpense(userCtx, input)
 			assert.Equal(t, tt.want, validationFields(t, err))
 		})
 	}
@@ -137,7 +138,7 @@ func TestCreateExpense_RepositoryError(t *testing.T) {
 	ts := setupHandlerTestSuite(t)
 	ts.expenseRepo.EXPECT().Create(gomock.Any(), gomock.Any()).Return(errDatabase)
 
-	_, err := ts.handler.CreateExpense(context.Background(), validInput())
+	_, err := ts.handler.CreateExpense(userCtx, validInput())
 	assert.Same(t, pkg.InternalError, err, "internal details are not exposed")
 }
 
@@ -159,9 +160,9 @@ func TestGetExpense(t *testing.T) {
 			if tt.repoErr != nil {
 				stored = models.Expense{}
 			}
-			ts.expenseRepo.EXPECT().Get(gomock.Any(), "id-1").Return(stored, tt.repoErr)
+			ts.expenseRepo.EXPECT().Get(gomock.Any(), testUserId, "id-1").Return(stored, tt.repoErr)
 
-			got, err := ts.handler.GetExpense(context.Background(), "id-1")
+			got, err := ts.handler.GetExpense(userCtx, "id-1")
 			if tt.wantErr != nil {
 				assert.Same(t, tt.wantErr, err)
 				return
@@ -179,11 +180,11 @@ func TestListExpenses(t *testing.T) {
 	t.Run("passes the filter through", func(t *testing.T) {
 		ts := setupHandlerTestSuite(t)
 		want := []models.Expense{storedExpense()}
-		ts.expenseRepo.EXPECT().List(gomock.Any(), models.ExpenseFilter{
+		ts.expenseRepo.EXPECT().List(gomock.Any(), testUserId, models.ExpenseFilter{
 			DateFrom: from, DateTo: to, Category: models.CategoryGroceries, Merchant: "rewe",
 		}).Return(want, nil)
 
-		got, err := ts.handler.ListExpenses(context.Background(), models.ExpenseFilter{
+		got, err := ts.handler.ListExpenses(userCtx, models.ExpenseFilter{
 			DateFrom: from, DateTo: to, Category: models.CategoryGroceries, Merchant: "  rewe ",
 		})
 		require.NoError(t, err)
@@ -192,24 +193,24 @@ func TestListExpenses(t *testing.T) {
 
 	t.Run("same day is allowed", func(t *testing.T) {
 		ts := setupHandlerTestSuite(t)
-		ts.expenseRepo.EXPECT().List(gomock.Any(), models.ExpenseFilter{DateFrom: from, DateTo: from}).Return([]models.Expense{}, nil)
+		ts.expenseRepo.EXPECT().List(gomock.Any(), testUserId, models.ExpenseFilter{DateFrom: from, DateTo: from}).Return([]models.Expense{}, nil)
 
-		_, err := ts.handler.ListExpenses(context.Background(), models.ExpenseFilter{DateFrom: from, DateTo: from})
+		_, err := ts.handler.ListExpenses(userCtx, models.ExpenseFilter{DateFrom: from, DateTo: from})
 		require.NoError(t, err)
 	})
 
 	t.Run("blank merchant doesn't filter", func(t *testing.T) {
 		ts := setupHandlerTestSuite(t)
-		ts.expenseRepo.EXPECT().List(gomock.Any(), models.ExpenseFilter{}).Return([]models.Expense{}, nil)
+		ts.expenseRepo.EXPECT().List(gomock.Any(), testUserId, models.ExpenseFilter{}).Return([]models.Expense{}, nil)
 
-		_, err := ts.handler.ListExpenses(context.Background(), models.ExpenseFilter{Merchant: "   "})
+		_, err := ts.handler.ListExpenses(userCtx, models.ExpenseFilter{Merchant: "   "})
 		require.NoError(t, err)
 	})
 
 	t.Run("invalid filters", func(t *testing.T) {
 		ts := setupHandlerTestSuite(t)
 
-		_, err := ts.handler.ListExpenses(context.Background(), models.ExpenseFilter{
+		_, err := ts.handler.ListExpenses(userCtx, models.ExpenseFilter{
 			DateFrom: to, DateTo: from, Category: "pets", Merchant: strings.Repeat("x", models.MaxMerchantLength+1),
 		})
 		assert.Equal(t, map[string]string{
@@ -221,9 +222,9 @@ func TestListExpenses(t *testing.T) {
 
 	t.Run("database error", func(t *testing.T) {
 		ts := setupHandlerTestSuite(t)
-		ts.expenseRepo.EXPECT().List(gomock.Any(), gomock.Any()).Return(nil, errDatabase)
+		ts.expenseRepo.EXPECT().List(gomock.Any(), testUserId, gomock.Any()).Return(nil, errDatabase)
 
-		_, err := ts.handler.ListExpenses(context.Background(), models.ExpenseFilter{})
+		_, err := ts.handler.ListExpenses(userCtx, models.ExpenseFilter{})
 		assert.Same(t, pkg.InternalError, err)
 	})
 }
@@ -266,13 +267,13 @@ func TestUpdateExpense_Success(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ts := setupHandlerTestSuite(t)
 			before := storedExpense()
-			ts.expenseRepo.EXPECT().Get(gomock.Any(), before.Id).Return(before, nil)
+			ts.expenseRepo.EXPECT().Get(gomock.Any(), testUserId, before.Id).Return(before, nil)
 
 			var written models.Expense
 			ts.expenseRepo.EXPECT().Update(gomock.Any(), gomock.Any()).
 				DoAndReturn(func(_ context.Context, e models.Expense) error { written = e; return nil })
 
-			got, err := ts.handler.UpdateExpense(context.Background(), before.Id, tt.patch)
+			got, err := ts.handler.UpdateExpense(userCtx, before.Id, tt.patch)
 			require.NoError(t, err)
 			assert.Equal(t, written, got)
 			assert.Equal(t, before.Id, got.Id)
@@ -296,10 +297,10 @@ func TestUpdateExpense_NoChanges(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ts := setupHandlerTestSuite(t)
 			before := storedExpense()
-			ts.expenseRepo.EXPECT().Get(gomock.Any(), before.Id).Return(before, nil)
+			ts.expenseRepo.EXPECT().Get(gomock.Any(), testUserId, before.Id).Return(before, nil)
 			// no Update expected
 
-			got, err := ts.handler.UpdateExpense(context.Background(), before.Id, tt.patch)
+			got, err := ts.handler.UpdateExpense(userCtx, before.Id, tt.patch)
 			require.NoError(t, err)
 			assert.Equal(t, before, got)
 		})
@@ -323,9 +324,9 @@ func TestUpdateExpense_Validation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ts := setupHandlerTestSuite(t)
 			before := storedExpense()
-			ts.expenseRepo.EXPECT().Get(gomock.Any(), before.Id).Return(before, nil)
+			ts.expenseRepo.EXPECT().Get(gomock.Any(), testUserId, before.Id).Return(before, nil)
 
-			_, err := ts.handler.UpdateExpense(context.Background(), before.Id, tt.patch)
+			_, err := ts.handler.UpdateExpense(userCtx, before.Id, tt.patch)
 			assert.Equal(t, tt.want, validationFields(t, err))
 		})
 	}
@@ -334,29 +335,29 @@ func TestUpdateExpense_Validation(t *testing.T) {
 func TestUpdateExpense_Errors(t *testing.T) {
 	t.Run("not found", func(t *testing.T) {
 		ts := setupHandlerTestSuite(t)
-		ts.expenseRepo.EXPECT().Get(gomock.Any(), "missing").Return(models.Expense{}, repositories.ErrExpenseNotFound)
+		ts.expenseRepo.EXPECT().Get(gomock.Any(), testUserId, "missing").Return(models.Expense{}, repositories.ErrExpenseNotFound)
 
-		_, err := ts.handler.UpdateExpense(context.Background(), "missing", map[string]any{"amount": "1"})
+		_, err := ts.handler.UpdateExpense(userCtx, "missing", map[string]any{"amount": "1"})
 		assert.Same(t, pkg.ErrExpenseNotFound, err)
 	})
 
 	t.Run("deleted between read and write", func(t *testing.T) {
 		ts := setupHandlerTestSuite(t)
 		before := storedExpense()
-		ts.expenseRepo.EXPECT().Get(gomock.Any(), before.Id).Return(before, nil)
+		ts.expenseRepo.EXPECT().Get(gomock.Any(), testUserId, before.Id).Return(before, nil)
 		ts.expenseRepo.EXPECT().Update(gomock.Any(), gomock.Any()).Return(repositories.ErrExpenseNotFound)
 
-		_, err := ts.handler.UpdateExpense(context.Background(), before.Id, map[string]any{"amount": "1"})
+		_, err := ts.handler.UpdateExpense(userCtx, before.Id, map[string]any{"amount": "1"})
 		assert.Same(t, pkg.ErrExpenseNotFound, err)
 	})
 
 	t.Run("database error on write", func(t *testing.T) {
 		ts := setupHandlerTestSuite(t)
 		before := storedExpense()
-		ts.expenseRepo.EXPECT().Get(gomock.Any(), before.Id).Return(before, nil)
+		ts.expenseRepo.EXPECT().Get(gomock.Any(), testUserId, before.Id).Return(before, nil)
 		ts.expenseRepo.EXPECT().Update(gomock.Any(), gomock.Any()).Return(errDatabase)
 
-		_, err := ts.handler.UpdateExpense(context.Background(), before.Id, map[string]any{"amount": "1"})
+		_, err := ts.handler.UpdateExpense(userCtx, before.Id, map[string]any{"amount": "1"})
 		assert.Same(t, pkg.InternalError, err)
 	})
 }
@@ -375,9 +376,9 @@ func TestDeleteExpense(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ts := setupHandlerTestSuite(t)
-			ts.expenseRepo.EXPECT().Delete(gomock.Any(), "id-1").Return(tt.repoErr)
+			ts.expenseRepo.EXPECT().Delete(gomock.Any(), testUserId, "id-1").Return(tt.repoErr)
 
-			err := ts.handler.DeleteExpense(context.Background(), "id-1")
+			err := ts.handler.DeleteExpense(userCtx, "id-1")
 			if tt.wantErr != nil {
 				assert.Same(t, tt.wantErr, err)
 				return

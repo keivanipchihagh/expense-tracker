@@ -145,15 +145,18 @@ func TestRegisterClient_RateLimited(t *testing.T) {
 func TestListConnectedApps(t *testing.T) {
 	ts := setupOAuthSuite(t)
 	want := []models.ConnectedApp{{Client: publicClient(), LastActiveAt: testNow}}
-	ts.oauthRepo.EXPECT().ListConnectedApps(gomock.Any(), testNow).Return(want, nil)
+	ts.oauthRepo.EXPECT().ListConnectedApps(gomock.Any(), testUserId, testNow).Return(want, nil)
 
-	got, err := ts.handler.ListConnectedApps(context.Background())
+	got, err := ts.handler.ListConnectedApps(userCtx)
 	require.NoError(t, err)
-	assert.Equal(t, want, got)
+	assert.Equal(t, want, got, "the signed-in user's apps")
 
-	ts.oauthRepo.EXPECT().ListConnectedApps(gomock.Any(), gomock.Any()).Return(nil, errors.New("db down"))
-	_, err = ts.handler.ListConnectedApps(context.Background())
+	ts.oauthRepo.EXPECT().ListConnectedApps(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, errors.New("db down"))
+	_, err = ts.handler.ListConnectedApps(userCtx)
 	assert.Same(t, pkg.InternalError, err)
+
+	_, err = ts.handler.ListConnectedApps(context.Background())
+	assert.Same(t, pkg.ErrNotSignedIn, err, "no user, no apps")
 }
 
 func TestRevokeApp(t *testing.T) {
@@ -169,9 +172,9 @@ func TestRevokeApp(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ts := setupOAuthSuite(t)
-			ts.oauthRepo.EXPECT().DeleteClient(gomock.Any(), "client-1").Return(tt.repoErr)
+			ts.oauthRepo.EXPECT().RevokeClient(gomock.Any(), testUserId, "client-1").Return(tt.repoErr)
 
-			err := ts.handler.RevokeApp(context.Background(), "client-1")
+			err := ts.handler.RevokeApp(userCtx, "client-1")
 			if tt.wantErr != nil {
 				assert.Same(t, tt.wantErr, err)
 				return
@@ -232,16 +235,22 @@ func TestCheckAuthorizeRequest_DatabaseError(t *testing.T) {
 	assert.Same(t, pkg.InternalError, err)
 }
 
+func TestRevokeApp_NeedsUser(t *testing.T) {
+	ts := setupOAuthSuite(t)
+	assert.Same(t, pkg.ErrNotSignedIn, ts.handler.RevokeApp(context.Background(), "client-1"))
+}
+
 func TestAuthorize_Success(t *testing.T) {
 	ts := setupOAuthSuite(t)
+	ts.knowsUser()
 	ts.oauthRepo.EXPECT().GetClient(gomock.Any(), "client-1").Return(publicClient(), nil)
 
 	var stored models.OAuthCode
 	ts.oauthRepo.EXPECT().CreateCode(gomock.Any(), gomock.Any()).
 		DoAndReturn(func(_ context.Context, c models.OAuthCode) error { stored = c; return nil })
 
-	redirect, err := ts.handler.Authorize(context.Background(), validAuthorizeRequest(), testPassword)
-	require.NoError(t, err)
+	redirect, err := ts.handler.Authorize(context.Background(), validAuthorizeRequest(), " Alice@Example.com ", testPassword)
+	require.NoError(t, err, "the email is trimmed and lowercased")
 
 	u, err := url.Parse(redirect)
 	require.NoError(t, err)
@@ -255,32 +264,37 @@ func TestAuthorize_Success(t *testing.T) {
 	assert.Equal(t, testChallenge, stored.CodeChallenge)
 	assert.Equal(t, "https://claude.ai/api/mcp/auth_callback", stored.RedirectUri)
 	assert.Equal(t, testNow.Add(authCodeTTL), stored.ExpiresAt)
+	assert.Equal(t, testUserId, stored.UserId, "the code is bound to who signed in")
 }
 
-func TestAuthorize_WrongPassword(t *testing.T) {
+func TestAuthorize_WrongCredentials(t *testing.T) {
 	ts := setupOAuthSuite(t)
-	ts.oauthRepo.EXPECT().GetClient(gomock.Any(), gomock.Any()).Return(publicClient(), nil)
+	ts.knowsUser()
+	ts.oauthRepo.EXPECT().GetClient(gomock.Any(), gomock.Any()).Return(publicClient(), nil).Times(2)
 
-	_, err := ts.handler.Authorize(context.Background(), validAuthorizeRequest(), "nope")
+	_, err := ts.handler.Authorize(context.Background(), validAuthorizeRequest(), testEmail, "nope")
 	assert.ErrorIs(t, err, ErrWrongPassword)
+	_, err = ts.handler.Authorize(context.Background(), validAuthorizeRequest(), "nobody@example.com", testPassword)
+	assert.ErrorIs(t, err, ErrWrongPassword, "an unknown email gets the same answer")
 }
 
 func TestAuthorize_LockoutAfterRepeatedFailures(t *testing.T) {
 	ts := setupOAuthSuite(t)
+	ts.knowsUser()
 	ts.oauthRepo.EXPECT().GetClient(gomock.Any(), gomock.Any()).Return(publicClient(), nil).AnyTimes()
 
 	for range maxFailedLogins {
-		_, err := ts.handler.Authorize(context.Background(), validAuthorizeRequest(), "nope")
+		_, err := ts.handler.Authorize(context.Background(), validAuthorizeRequest(), testEmail, "nope")
 		require.ErrorIs(t, err, ErrWrongPassword)
 	}
 
-	_, err := ts.handler.Authorize(context.Background(), validAuthorizeRequest(), testPassword)
-	assert.ErrorIs(t, err, ErrTooManyLogins, "even the right password is refused while locked")
+	_, err := ts.handler.Authorize(context.Background(), validAuthorizeRequest(), "ALICE@example.com", testPassword)
+	assert.ErrorIs(t, err, ErrTooManyLogins, "even the right password is refused while locked, in any letter case")
 
 	// Once the window has passed, the right password works again.
 	ts.handler.now = func() time.Time { return testNow.Add(failedLoginWindow + time.Second) }
 	ts.oauthRepo.EXPECT().CreateCode(gomock.Any(), gomock.Any()).Return(nil)
-	_, err = ts.handler.Authorize(context.Background(), validAuthorizeRequest(), testPassword)
+	_, err = ts.handler.Authorize(context.Background(), validAuthorizeRequest(), testEmail, testPassword)
 	assert.NoError(t, err)
 }
 
@@ -288,7 +302,7 @@ func TestAuthorize_InvalidRequestSkipsPasswordCheck(t *testing.T) {
 	ts := setupOAuthSuite(t)
 	ts.oauthRepo.EXPECT().GetClient(gomock.Any(), gomock.Any()).Return(models.OAuthClient{}, repositories.ErrOAuthNotFound)
 
-	_, err := ts.handler.Authorize(context.Background(), validAuthorizeRequest(), testPassword)
+	_, err := ts.handler.Authorize(context.Background(), validAuthorizeRequest(), testEmail, testPassword)
 	var authErr *AuthorizeError
 	assert.ErrorAs(t, err, &authErr)
 }
@@ -308,6 +322,7 @@ func validCode() models.OAuthCode {
 	return models.OAuthCode{
 		CodeHash:      hashSecret("the-code"),
 		ClientId:      "client-1",
+		UserId:        testUserId,
 		RedirectUri:   "https://claude.ai/api/mcp/auth_callback",
 		CodeChallenge: testChallenge,
 		ExpiresAt:     testNow.Add(time.Minute),
@@ -340,8 +355,8 @@ func TestToken_AuthorizationCode(t *testing.T) {
 	assert.Equal(t, 3600, resp.ExpiresIn)
 
 	require.Len(t, issued, 2)
-	assert.Equal(t, models.OAuthToken{TokenHash: hashSecret(resp.AccessToken), Kind: models.OAuthTokenAccess, ClientId: "client-1", ExpiresAt: testNow.Add(accessTokenTTL), CreatedAt: testNow}, issued[0])
-	assert.Equal(t, models.OAuthToken{TokenHash: hashSecret(resp.RefreshToken), Kind: models.OAuthTokenRefresh, ClientId: "client-1", ExpiresAt: testNow.Add(refreshTokenTTL), CreatedAt: testNow}, issued[1])
+	assert.Equal(t, models.OAuthToken{TokenHash: hashSecret(resp.AccessToken), Kind: models.OAuthTokenAccess, ClientId: "client-1", UserId: testUserId, ExpiresAt: testNow.Add(accessTokenTTL), CreatedAt: testNow}, issued[0])
+	assert.Equal(t, models.OAuthToken{TokenHash: hashSecret(resp.RefreshToken), Kind: models.OAuthTokenRefresh, ClientId: "client-1", UserId: testUserId, ExpiresAt: testNow.Add(refreshTokenTTL), CreatedAt: testNow}, issued[1], "tokens belong to the code's user")
 }
 
 func TestToken_AuthorizationCode_Rejected(t *testing.T) {
@@ -427,7 +442,7 @@ func TestToken_ClientAuthentication(t *testing.T) {
 }
 
 func TestToken_RefreshToken(t *testing.T) {
-	refresh := models.OAuthToken{TokenHash: hashSecret("old-refresh"), Kind: models.OAuthTokenRefresh, ClientId: "client-1", ExpiresAt: testNow.Add(time.Hour)}
+	refresh := models.OAuthToken{TokenHash: hashSecret("old-refresh"), Kind: models.OAuthTokenRefresh, ClientId: "client-1", UserId: "user-7", ExpiresAt: testNow.Add(time.Hour)}
 	req := TokenRequest{GrantType: "refresh_token", RefreshToken: "old-refresh", ClientId: "client-1"}
 
 	t.Run("rotates", func(t *testing.T) {
@@ -435,12 +450,17 @@ func TestToken_RefreshToken(t *testing.T) {
 		ts.oauthRepo.EXPECT().GetClient(gomock.Any(), "client-1").Return(publicClient(), nil)
 		ts.oauthRepo.EXPECT().GetToken(gomock.Any(), hashSecret("old-refresh"), models.OAuthTokenRefresh).Return(refresh, nil)
 		ts.oauthRepo.EXPECT().ConsumeToken(gomock.Any(), hashSecret("old-refresh"), models.OAuthTokenRefresh).Return(refresh, nil)
-		ts.oauthRepo.EXPECT().CreateTokens(gomock.Any(), gomock.Any()).Return(nil)
+		var issued []models.OAuthToken
+		ts.oauthRepo.EXPECT().CreateTokens(gomock.Any(), gomock.Any()).
+			DoAndReturn(func(_ context.Context, tokens ...models.OAuthToken) error { issued = tokens; return nil })
 		ts.oauthRepo.EXPECT().DeleteExpired(gomock.Any(), gomock.Any()).Return(nil)
 
 		resp, err := ts.handler.Token(context.Background(), req)
 		require.NoError(t, err)
 		assert.NotEqual(t, "old-refresh", resp.RefreshToken)
+		require.Len(t, issued, 2)
+		assert.Equal(t, "user-7", issued[0].UserId, "refreshing keeps the same user")
+		assert.Equal(t, "user-7", issued[1].UserId)
 	})
 
 	// None of these consume the token (no ConsumeToken expectation): a token
@@ -498,8 +518,9 @@ func TestValidateAccessToken(t *testing.T) {
 		wantValid bool
 		wantErr   bool
 	}{
-		{name: "valid", token: models.OAuthToken{ExpiresAt: testNow.Add(time.Minute)}, wantValid: true},
-		{name: "expired", token: models.OAuthToken{ExpiresAt: testNow}},
+		{name: "valid", token: models.OAuthToken{UserId: testUserId, ExpiresAt: testNow.Add(time.Minute)}, wantValid: true},
+		{name: "expired", token: models.OAuthToken{UserId: testUserId, ExpiresAt: testNow}},
+		{name: "from before accounts (no user)", token: models.OAuthToken{ExpiresAt: testNow.Add(time.Minute)}},
 		{name: "unknown", err: repositories.ErrOAuthNotFound},
 		{name: "database error", err: errors.New("db down"), wantErr: true},
 	}
@@ -509,13 +530,18 @@ func TestValidateAccessToken(t *testing.T) {
 			ts := setupOAuthSuite(t)
 			ts.oauthRepo.EXPECT().GetToken(gomock.Any(), hashSecret("tok"), models.OAuthTokenAccess).Return(tt.token, tt.err)
 
-			valid, err := ts.handler.ValidateAccessToken(context.Background(), "tok")
+			uid, valid, err := ts.handler.ValidateAccessToken(context.Background(), "tok")
 			if tt.wantErr {
 				assert.Error(t, err)
 				return
 			}
 			require.NoError(t, err)
 			assert.Equal(t, tt.wantValid, valid)
+			if tt.wantValid {
+				assert.Equal(t, testUserId, uid)
+			} else {
+				assert.Empty(t, uid)
+			}
 		})
 	}
 }

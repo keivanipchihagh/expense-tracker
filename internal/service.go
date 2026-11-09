@@ -60,13 +60,18 @@ func Run() {
 		fatal("failed to initialize session repository", "error", err)
 	}
 
-	settingRepo, err := repositories.NewSettingRepository(ctx, db)
+	userRepo, err := repositories.NewUserRepository(ctx, db)
 	if err != nil {
-		fatal("failed to initialize setting repository", "error", err)
+		fatal("failed to initialize user repository", "error", err)
 	}
 
 	// Initialize handler and API
-	h := handler.NewHandler(expenseRepo, oauthRepo, sessionRepo, settingRepo, cfg.PublicUrl, cfg.AuthPassword)
+	h := handler.NewHandler(expenseRepo, oauthRepo, sessionRepo, userRepo, cfg.PublicUrl, cfg.SignupEnabled)
+
+	// Give data from before accounts existed an owner
+	if err := adoptLegacyData(ctx, db, h, cfg); err != nil {
+		fatal("failed to assign existing data to an owner", "error", err)
+	}
 	server := api.NewServer(h, cfg.AppVersion, cfg.PublicUrl)
 
 	// Start HTTP server: the API needs a bearer token, the UI a session

@@ -7,9 +7,12 @@
   <p class="muted">Sign in to see your expenses.</p>
   {{if .Error}}<p class="alert" role="alert">{{.Error}}</p>{{end}}
   <form method="post" action="/login">
+    <label class="sr-only" for="email">Email</label>
+    <input id="email" type="email" name="email" value="{{index .Form "email"}}" placeholder="Email" autocomplete="email" required autofocus>
     <label class="sr-only" for="password">Password</label>
-    <input id="password" type="password" name="password" placeholder="Password" autocomplete="current-password" required autofocus>
+    <input id="password" type="password" name="password" placeholder="Password" autocomplete="current-password" required>
     <button type="submit" class="primary block">Sign in</button>
   </form>
+  {{if .SignupEnabled}}<p class="login-note muted">New here? <a href="/signup">Create an account</a></p>{{end}}
 </section>
 {{end}}

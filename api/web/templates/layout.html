@@ -21,11 +21,23 @@
     <nav class="nav">
       <a href="/" class="{{if eq .Nav "expenses"}}active{{end}}">Expenses</a>
       <a href="/analysis" class="{{if eq .Nav "analysis"}}active{{end}}">Analysis</a>
-      <a href="/apps" class="{{if eq .Nav "apps"}}active{{end}}">Apps</a>
       {{template "theme-toggle"}}
-      <form method="post" action="/logout">
-        <button type="submit" class="ghost small">Sign out</button>
-      </form>
+      {{with .Profile}}
+      <details class="profile-menu" data-menu>
+        <summary class="avatar-button {{if or (eq $.Nav "settings") (eq $.Nav "apps")}}active{{end}}" aria-label="Account menu" title="{{.DisplayName}}">{{.Initials}}</summary>
+        <div class="menu">
+          <div class="menu-head">
+            <span class="menu-name">{{.DisplayName}}</span>
+            <span class="menu-sub">{{.Email}}</span>
+          </div>
+          <a href="/settings" class="{{if eq $.Nav "settings"}}current{{end}}">Settings</a>
+          <a href="/apps" class="{{if eq $.Nav "apps"}}current{{end}}">Apps</a>
+          <form method="post" action="/logout">
+            <button type="submit" class="menu-item">Sign out</button>
+          </form>
+        </div>
+      </details>
+      {{end}}
     </nav>
   </header>
   {{else}}

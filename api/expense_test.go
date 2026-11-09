@@ -121,7 +121,7 @@ func TestListExpenses_Endpoint(t *testing.T) {
 		routes, repo := newTestRoutes(t)
 		from := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
 		to := time.Date(2026, 11, 30, 0, 0, 0, 0, time.UTC)
-		repo.EXPECT().List(gomock.Any(), models.ExpenseFilter{DateFrom: from, DateTo: to}).Return([]models.Expense{sampleExpense()}, nil)
+		repo.EXPECT().List(gomock.Any(), testUserId, models.ExpenseFilter{DateFrom: from, DateTo: to}).Return([]models.Expense{sampleExpense()}, nil)
 
 		rec := do(routes, http.MethodGet, "/api/v1/expenses?date_from=2026-11-01&date_to=2026-11-30", "")
 		require.Equal(t, http.StatusOK, rec.Code)
@@ -134,7 +134,7 @@ func TestListExpenses_Endpoint(t *testing.T) {
 
 	t.Run("empty list is [] not null", func(t *testing.T) {
 		routes, repo := newTestRoutes(t)
-		repo.EXPECT().List(gomock.Any(), models.ExpenseFilter{}).Return([]models.Expense{}, nil)
+		repo.EXPECT().List(gomock.Any(), testUserId, models.ExpenseFilter{}).Return([]models.Expense{}, nil)
 
 		rec := do(routes, http.MethodGet, "/api/v1/expenses", "")
 		require.Equal(t, http.StatusOK, rec.Code)
@@ -143,7 +143,7 @@ func TestListExpenses_Endpoint(t *testing.T) {
 
 	t.Run("category and merchant filters", func(t *testing.T) {
 		routes, repo := newTestRoutes(t)
-		repo.EXPECT().List(gomock.Any(), models.ExpenseFilter{Category: models.CategoryGroceries, Merchant: "rewe city"}).
+		repo.EXPECT().List(gomock.Any(), testUserId, models.ExpenseFilter{Category: models.CategoryGroceries, Merchant: "rewe city"}).
 			Return([]models.Expense{}, nil)
 
 		rec := do(routes, http.MethodGet, "/api/v1/expenses?category=groceries&merchant=rewe+city", "")
@@ -181,7 +181,7 @@ func TestListExpenses_Endpoint(t *testing.T) {
 func TestGetExpense_Endpoint(t *testing.T) {
 	t.Run("found", func(t *testing.T) {
 		routes, repo := newTestRoutes(t)
-		repo.EXPECT().Get(gomock.Any(), "e1").Return(sampleExpense(), nil)
+		repo.EXPECT().Get(gomock.Any(), testUserId, "e1").Return(sampleExpense(), nil)
 
 		rec := do(routes, http.MethodGet, "/api/v1/expenses/e1", "")
 		require.Equal(t, http.StatusOK, rec.Code)
@@ -190,7 +190,7 @@ func TestGetExpense_Endpoint(t *testing.T) {
 
 	t.Run("not found", func(t *testing.T) {
 		routes, repo := newTestRoutes(t)
-		repo.EXPECT().Get(gomock.Any(), "nope").Return(models.Expense{}, repositories.ErrExpenseNotFound)
+		repo.EXPECT().Get(gomock.Any(), testUserId, "nope").Return(models.Expense{}, repositories.ErrExpenseNotFound)
 
 		rec := do(routes, http.MethodGet, "/api/v1/expenses/nope", "")
 		require.Equal(t, http.StatusNotFound, rec.Code)
@@ -201,7 +201,7 @@ func TestGetExpense_Endpoint(t *testing.T) {
 func TestUpdateExpense_Endpoint(t *testing.T) {
 	t.Run("updated", func(t *testing.T) {
 		routes, repo := newTestRoutes(t)
-		repo.EXPECT().Get(gomock.Any(), "e1").Return(sampleExpense(), nil)
+		repo.EXPECT().Get(gomock.Any(), testUserId, "e1").Return(sampleExpense(), nil)
 		repo.EXPECT().Update(gomock.Any(), gomock.Any()).Return(nil)
 
 		rec := do(routes, http.MethodPatch, "/api/v1/expenses/e1", `{"note":"corrected"}`)
@@ -211,7 +211,7 @@ func TestUpdateExpense_Endpoint(t *testing.T) {
 
 	t.Run("not found", func(t *testing.T) {
 		routes, repo := newTestRoutes(t)
-		repo.EXPECT().Get(gomock.Any(), "nope").Return(models.Expense{}, repositories.ErrExpenseNotFound)
+		repo.EXPECT().Get(gomock.Any(), testUserId, "nope").Return(models.Expense{}, repositories.ErrExpenseNotFound)
 
 		rec := do(routes, http.MethodPatch, "/api/v1/expenses/nope", `{"note":"x"}`)
 		require.Equal(t, http.StatusNotFound, rec.Code)
@@ -228,7 +228,7 @@ func TestUpdateExpense_Endpoint(t *testing.T) {
 func TestDeleteExpense_Endpoint(t *testing.T) {
 	t.Run("deleted", func(t *testing.T) {
 		routes, repo := newTestRoutes(t)
-		repo.EXPECT().Delete(gomock.Any(), "e1").Return(nil)
+		repo.EXPECT().Delete(gomock.Any(), testUserId, "e1").Return(nil)
 
 		rec := do(routes, http.MethodDelete, "/api/v1/expenses/e1", "")
 		require.Equal(t, http.StatusNoContent, rec.Code)
@@ -237,7 +237,7 @@ func TestDeleteExpense_Endpoint(t *testing.T) {
 
 	t.Run("not found", func(t *testing.T) {
 		routes, repo := newTestRoutes(t)
-		repo.EXPECT().Delete(gomock.Any(), "nope").Return(repositories.ErrExpenseNotFound)
+		repo.EXPECT().Delete(gomock.Any(), testUserId, "nope").Return(repositories.ErrExpenseNotFound)
 
 		rec := do(routes, http.MethodDelete, "/api/v1/expenses/nope", "")
 		require.Equal(t, http.StatusNotFound, rec.Code)

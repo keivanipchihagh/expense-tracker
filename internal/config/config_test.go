@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"testing"
 	"time"
 
@@ -19,7 +20,7 @@ func TestNewConfig(t *testing.T) {
 		HttpMaxBodyBytes:   1 << 20,
 		SqlitePath:         "data/expense.db",
 		PublicUrl:          "http://localhost:8000",
-		AuthPassword:       testPassword,
+		SignupEnabled:      true,
 	}
 
 	tests := []struct {
@@ -29,8 +30,8 @@ func TestNewConfig(t *testing.T) {
 		wantErr string
 	}{
 		{
-			name: "defaults",
-			env:  map[string]string{"AUTH_PASSWORD": testPassword},
+			name: "defaults: nothing is required",
+			env:  map[string]string{},
 			want: defaults,
 		},
 		{
@@ -43,6 +44,8 @@ func TestNewConfig(t *testing.T) {
 				"HTTP_MAX_BODY_BYTES":  "2048",
 				"SQLITE_PATH":          "/data/expense.db",
 				"PUBLIC_URL":           "https://expenses.example.com/",
+				"SIGNUP_ENABLED":       "false",
+				"OWNER_EMAIL":          "keivan@example.com",
 				"AUTH_PASSWORD":        testPassword,
 			},
 			want: Config{
@@ -53,24 +56,25 @@ func TestNewConfig(t *testing.T) {
 				HttpMaxBodyBytes:   2048,
 				SqlitePath:         "/data/expense.db",
 				PublicUrl:          "https://expenses.example.com",
+				SignupEnabled:      false,
+				OwnerEmail:         "keivan@example.com",
 				AuthPassword:       testPassword,
 			},
 		},
 		{
 			name: "similarly named variables are ignored",
 			env: map[string]string{
-				"AUTH_PASSWORD": testPassword,
-				"PORT":          "9000",
-				"VERSION":       "v9.9.9",
-				"LEVEL":         "debug",
+				"PORT":    "9000",
+				"VERSION": "v9.9.9",
+				"LEVEL":   "debug",
 			},
 			want: defaults,
 		},
 		{name: "invalid port", env: map[string]string{"AUTH_PASSWORD": testPassword, "HTTP_PORT": "abc"}, wantErr: "parse environment"},
 		{name: "invalid duration", env: map[string]string{"AUTH_PASSWORD": testPassword, "HTTP_REQUEST_TIMEOUT": "soon"}, wantErr: "parse environment"},
-		{name: "missing password", env: map[string]string{}, wantErr: "AUTH_PASSWORD"},
 		{name: "template password", env: map[string]string{"AUTH_PASSWORD": "change-me"}, wantErr: "template value"},
-		{name: "short password", env: map[string]string{"AUTH_PASSWORD": "short"}, wantErr: "at least 16 characters"},
+		{name: "short password", env: map[string]string{"AUTH_PASSWORD": "short"}, wantErr: "at least 10 characters"},
+		{name: "invalid signup switch", env: map[string]string{"SIGNUP_ENABLED": "maybe"}, wantErr: "parse environment"},
 		{name: "relative public url", env: map[string]string{"AUTH_PASSWORD": testPassword, "PUBLIC_URL": "expenses.example.com"}, wantErr: "PUBLIC_URL"},
 		{name: "non-http public url", env: map[string]string{"AUTH_PASSWORD": testPassword, "PUBLIC_URL": "ftp://example.com"}, wantErr: "PUBLIC_URL"},
 	}
@@ -78,7 +82,10 @@ func TestNewConfig(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Make sure a password from the developer's shell doesn't leak in.
-			t.Setenv("AUTH_PASSWORD", "")
+			for _, k := range []string{"AUTH_PASSWORD", "OWNER_EMAIL", "SIGNUP_ENABLED"} {
+				t.Setenv(k, "") // restores the original value after the test
+				require.NoError(t, os.Unsetenv(k))
+			}
 			for k, v := range tt.env {
 				t.Setenv(k, v)
 			}

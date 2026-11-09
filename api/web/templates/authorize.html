@@ -15,8 +15,10 @@
     <input type="hidden" name="code_challenge_method" value="{{.Request.CodeChallengeMethod}}">
     <input type="hidden" name="state" value="{{.Request.State}}">
     <input type="hidden" name="resource" value="{{.Request.Resource}}">
+    <label class="sr-only" for="email">Email</label>
+    <input id="email" type="email" name="email" value="{{.Email}}" placeholder="Email" autocomplete="email" required autofocus>
     <label class="sr-only" for="password">Password</label>
-    <input id="password" type="password" name="password" placeholder="Password" autocomplete="current-password" required autofocus>
+    <input id="password" type="password" name="password" placeholder="Password" autocomplete="current-password" required>
     <button type="submit" class="primary block">Sign in</button>
   </form>
   <p class="login-note muted">After you sign in you'll be sent to <strong>{{.RedirectHost}}</strong>. If you don't recognise it, close this page.</p>

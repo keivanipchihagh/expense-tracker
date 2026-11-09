@@ -30,6 +30,9 @@ func newTestExpenseRepo(t *testing.T) (ExpenseRepository, *sqlite.Client) {
 //go:fix inline
 func strPtr(s string) *string { return new(s) }
 
+// testUser owns the expenses newExpense builds.
+const testUser = "user-1"
+
 // newExpense returns a valid expense occurring at the given RFC 3339 time.
 func newExpense(id, occurredAt string) models.Expense {
 	t, err := time.Parse(time.RFC3339Nano, occurredAt)
@@ -39,6 +42,7 @@ func newExpense(id, occurredAt string) models.Expense {
 	created := time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)
 	return models.Expense{
 		Id:         id,
+		UserId:     testUser,
 		Amount:     "12.50",
 		OccurredAt: t,
 		Category:   models.CategoryFood,
@@ -90,7 +94,7 @@ func TestExpenseRepository_CreateAndGet(t *testing.T) {
 
 			require.NoError(t, repo.Create(ctx, tt.expense))
 
-			got, err := repo.Get(ctx, tt.expense.Id)
+			got, err := repo.Get(ctx, testUser, tt.expense.Id)
 			require.NoError(t, err)
 
 			// Compare the JSON form: it shows the offset and every field as the API sends them.
@@ -115,7 +119,7 @@ func TestExpenseRepository_CreateDuplicateId(t *testing.T) {
 func TestExpenseRepository_GetNotFound(t *testing.T) {
 	repo, _ := newTestExpenseRepo(t)
 
-	_, err := repo.Get(context.Background(), "missing")
+	_, err := repo.Get(context.Background(), testUser, "missing")
 	assert.ErrorIs(t, err, ErrExpenseNotFound)
 }
 
@@ -163,7 +167,7 @@ func TestExpenseRepository_List(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := repo.List(ctx, models.ExpenseFilter{DateFrom: tt.from, DateTo: tt.to})
+			got, err := repo.List(ctx, testUser, models.ExpenseFilter{DateFrom: tt.from, DateTo: tt.to})
 			require.NoError(t, err)
 			assert.NotNil(t, got)
 			assert.Equal(t, tt.want, ids(got))
@@ -214,7 +218,7 @@ func TestExpenseRepository_ListFilters(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := repo.List(ctx, tt.filter)
+			got, err := repo.List(ctx, testUser, tt.filter)
 			require.NoError(t, err)
 			ids := []string{}
 			for _, e := range got {
@@ -242,7 +246,7 @@ func TestExpenseRepository_Update(t *testing.T) {
 	changed.CreatedAt = original.CreatedAt.Add(24 * time.Hour) // must be ignored
 	require.NoError(t, repo.Update(ctx, changed))
 
-	got, err := repo.Get(ctx, "e1")
+	got, err := repo.Get(ctx, testUser, "e1")
 	require.NoError(t, err)
 	assert.Equal(t, "20.00", got.Amount)
 	assert.Equal(t, models.CategoryGroceries, got.Category)
@@ -278,9 +282,9 @@ func TestExpenseRepository_Delete(t *testing.T) {
 
 	e := newExpense("e1", "2026-11-07T13:20:00+01:00")
 	require.NoError(t, repo.Create(ctx, e))
-	require.NoError(t, repo.Delete(ctx, "e1"))
+	require.NoError(t, repo.Delete(ctx, testUser, "e1"))
 
-	_, err := repo.Get(ctx, "e1")
+	_, err := repo.Get(ctx, testUser, "e1")
 	assert.ErrorIs(t, err, ErrExpenseNotFound, "delete is permanent")
 
 	logs := readLogs(t, client)
@@ -297,7 +301,7 @@ func TestExpenseRepository_Delete(t *testing.T) {
 func TestExpenseRepository_DeleteNotFound(t *testing.T) {
 	repo, client := newTestExpenseRepo(t)
 
-	assert.ErrorIs(t, repo.Delete(context.Background(), "missing"), ErrExpenseNotFound)
+	assert.ErrorIs(t, repo.Delete(context.Background(), testUser, "missing"), ErrExpenseNotFound)
 	assert.Empty(t, readLogs(t, client))
 }
 
@@ -316,7 +320,7 @@ func TestExpenseRepository_LogFailureRollsBack(t *testing.T) {
 	err = repo.Create(ctx, newExpense("e1", "2026-11-07T13:20:00Z"))
 	require.ErrorIs(t, err, errLog)
 
-	_, err = repo.Get(ctx, "e1")
+	_, err = repo.Get(ctx, testUser, "e1")
 	assert.ErrorIs(t, err, ErrExpenseNotFound, "the expense is not stored when its log fails")
 }
 
@@ -376,10 +380,20 @@ func TestExpenseRepository_DropsCurrencyColumn(t *testing.T) {
 		require.NoError(t, rows.Err())
 		return out
 	}
-	assert.Equal(t, []string{"id", "amount", "occurred_at", "category", "merchant", "note", "created_at", "updated_at"}, columns())
+	assert.Equal(t, []string{"id", "amount", "occurred_at", "category", "merchant", "note", "created_at", "updated_at", "user_id"}, columns(),
+		"currency is gone; user_id is added at the end")
+
+	// Old rows have no owner, so nobody sees them until one is assigned.
+	got, err := repo.List(ctx, testUser, models.ExpenseFilter{})
+	require.NoError(t, err)
+	assert.Empty(t, got)
+	unowned, err := CountUnowned(ctx, client)
+	require.NoError(t, err)
+	assert.Equal(t, 2, unowned)
+	require.NoError(t, AssignUnowned(ctx, client, testUser))
 
 	// Every row survives with its amount unchanged.
-	got, err := repo.List(ctx, models.ExpenseFilter{})
+	got, err = repo.List(ctx, testUser, models.ExpenseFilter{})
 	require.NoError(t, err)
 	require.Len(t, got, 2)
 	assert.Equal(t, "eur", got[0].Id)
@@ -393,7 +407,7 @@ func TestExpenseRepository_DropsCurrencyColumn(t *testing.T) {
 	require.NoError(t, repo.Create(ctx, newExpense("new", "2026-11-09T10:00:00+01:00")))
 	_, err = NewExpenseRepository(ctx, client, logRepo)
 	require.NoError(t, err)
-	got, err = repo.List(ctx, models.ExpenseFilter{})
+	got, err = repo.List(ctx, testUser, models.ExpenseFilter{})
 	require.NoError(t, err)
 	assert.Len(t, got, 3)
 }
@@ -407,4 +421,38 @@ func TestExpenseRepository_SnapshotsHaveNoCurrency(t *testing.T) {
 	require.NoError(t, client.QueryRowContext(ctx, `SELECT "after" FROM logs WHERE expense_id = 'e1'`).Scan(&after))
 	assert.NotContains(t, after, "currency")
 	assert.Contains(t, after, `"amount":"12.50"`)
+}
+
+func TestExpenseRepository_UsersAreIsolated(t *testing.T) {
+	repo, client := newTestExpenseRepo(t)
+	ctx := context.Background()
+
+	mine := newExpense("mine", "2026-11-07T13:20:00+01:00")
+	theirs := newExpense("theirs", "2026-11-07T14:00:00+01:00")
+	theirs.UserId = "user-2"
+	require.NoError(t, repo.Create(ctx, mine))
+	require.NoError(t, repo.Create(ctx, theirs))
+
+	got, err := repo.List(ctx, testUser, models.ExpenseFilter{})
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, "mine", got[0].Id)
+	assert.Equal(t, testUser, got[0].UserId)
+
+	_, err = repo.Get(ctx, testUser, "theirs")
+	assert.ErrorIs(t, err, ErrExpenseNotFound, "someone else's expense doesn't exist for you")
+
+	hijack := theirs
+	hijack.UserId = testUser
+	hijack.Amount = "0.01"
+	assert.ErrorIs(t, repo.Update(ctx, hijack), ErrExpenseNotFound, "nor can you change it")
+	assert.ErrorIs(t, repo.Delete(ctx, testUser, "theirs"), ErrExpenseNotFound, "or delete it")
+
+	still, err := repo.Get(ctx, "user-2", "theirs")
+	require.NoError(t, err)
+	assert.Equal(t, "12.50", still.Amount, "untouched")
+
+	var logUser string
+	require.NoError(t, client.QueryRowContext(ctx, "SELECT user_id FROM logs WHERE expense_id = 'theirs'").Scan(&logUser))
+	assert.Equal(t, "user-2", logUser, "logs record the owner")
 }

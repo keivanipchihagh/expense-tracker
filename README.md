@@ -3,11 +3,12 @@
 ![GitHub repo size](https://img.shields.io/github/repo-size/keivanipchihagh/expense-tracker)
 ![GitHub License](https://img.shields.io/github/license/keivanipchihagh/expense-tracker)
 
-A self-hosted expense log you can talk to. Tell an AI agent "12.50 for lunch at Rewe" and it's recorded; browse, filter and analyse it in a small web UI. Single user, one Go binary, SQLite, Docker.
+A self-hosted expense log you can talk to. Tell an AI agent "12.50 for lunch at Rewe" and it's recorded; browse, filter and analyse it in a small web UI. Accounts for several people, one Go binary, SQLite, Docker.
 
 ## Features
 
 - **MCP server** for Claude, ChatGPT, Gemini and other agents: log, correct, look up and delete expenses
+- **Accounts**: sign up with email and password; each person sees only their own expenses
 - **Web UI**: list and filter expenses, quick add, CSV/JSON export, light and dark theme
 - **Analysis**: totals against the previous period, category breakdown, spending over time, top merchants
 - **Built-in OAuth 2.1** for agents, and a REST API
@@ -16,11 +17,11 @@ A self-hosted expense log you can talk to. Tell an AI agent "12.50 for lunch at 
 ## Run
 
 ```bash
-cp .env.template .env   # set AUTH_PASSWORD (openssl rand -base64 24)
+cp .env.template .env
 docker compose -f deploy/docker-compose.yaml --env-file .env up -d --build
 ```
 
-Open http://localhost:8000 and sign in with `AUTH_PASSWORD`.
+Open http://localhost:8000 and create an account. Once everyone who needs one has signed up, set `SIGNUP_ENABLED=false`.
 
 > Stop the container before opening or copying `data/expense.db` from the host; SQLite in WAL mode can corrupt otherwise.
 
@@ -38,7 +39,7 @@ Agents that connect from the internet (claude.ai, ChatGPT, Gemini) need `PUBLIC_
 
 ## API
 
-`/api/v1/expenses` supports create, list (filter by `date_from`, `date_to`, `category`, `merchant`), get, update (`PATCH`, merge patch) and delete. It needs an OAuth bearer token; agents get one automatically, and [MCP Inspector](https://github.com/modelcontextprotocol/inspector) can get one by hand.
+`/api/v1/expenses` supports create, list (filter by `date_from`, `date_to`, `category`, `merchant`), get, update (`PATCH`, merge patch) and delete. `/api/v1/me` reads and updates your account (`PUT /api/v1/me/password` changes the password), and `POST /api/v1/users` signs up. Everything except sign-up needs an OAuth bearer token; agents get one automatically, and [MCP Inspector](https://github.com/modelcontextprotocol/inspector) can get one by hand.
 
 ```bash
 curl -X POST localhost:8000/api/v1/expenses -H "Authorization: Bearer $TOKEN" \
@@ -53,7 +54,7 @@ Requires Go 1.27+.
 make lint    # go fix, go vet, gofmt
 make test    # tests with the race detector
 make mocks   # regenerate mocks after changing a repository interface
-AUTH_PASSWORD=... go run .
+go run .
 ```
 
 Configuration is read from the environment; see [`.env.template`](.env.template).

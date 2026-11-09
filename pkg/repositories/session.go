@@ -24,6 +24,9 @@ type SessionRepository interface {
 	Delete(ctx context.Context, tokenHash string) error
 	// DeleteExpired removes sessions that expired before now.
 	DeleteExpired(ctx context.Context, now time.Time) error
+	// DeleteOthers removes the user's sessions except the one with keepHash
+	// (signs out other browsers, e.g. after a password change).
+	DeleteOthers(ctx context.Context, userId, keepHash string) error
 }
 
 type SessionRepositoryImpl struct {
@@ -34,6 +37,7 @@ type SessionRepositoryImpl struct {
 const sessionTableSchema = `
 	CREATE TABLE IF NOT EXISTS sessions (
 		token_hash TEXT    PRIMARY KEY,
+		user_id    TEXT,
 		expires_at INTEGER NOT NULL,
 		created_at INTEGER NOT NULL
 	)
@@ -47,13 +51,17 @@ func NewSessionRepository(ctx context.Context, client *sqlite.Client) (SessionRe
 	if _, err := client.ExecContext(ctx, sessionTableSchema); err != nil {
 		return nil, fmt.Errorf("create sessions table: %w", err)
 	}
+	// Sessions from before accounts belong to nobody: sign in again.
+	if err := addUserIdColumn(ctx, client, "sessions", true); err != nil {
+		return nil, err
+	}
 	return &SessionRepositoryImpl{client: client}, nil
 }
 
 func (r *SessionRepositoryImpl) Create(ctx context.Context, s models.Session) error {
 	_, err := r.client.ExecContext(ctx,
-		"INSERT INTO sessions (token_hash, expires_at, created_at) VALUES (?, ?, ?)",
-		s.TokenHash, s.ExpiresAt.Unix(), s.CreatedAt.Unix(),
+		"INSERT INTO sessions (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)",
+		s.TokenHash, s.UserId, s.ExpiresAt.Unix(), s.CreatedAt.Unix(),
 	)
 	if err != nil {
 		return fmt.Errorf("insert session: %w", err)
@@ -67,8 +75,8 @@ func (r *SessionRepositoryImpl) Get(ctx context.Context, tokenHash string) (mode
 		expiresAt, createdAt int64
 	)
 	err := r.client.QueryRowContext(ctx,
-		"SELECT token_hash, expires_at, created_at FROM sessions WHERE token_hash = ?", tokenHash,
-	).Scan(&s.TokenHash, &expiresAt, &createdAt)
+		"SELECT token_hash, user_id, expires_at, created_at FROM sessions WHERE token_hash = ?", tokenHash,
+	).Scan(&s.TokenHash, &s.UserId, &expiresAt, &createdAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return models.Session{}, ErrSessionNotFound
 	}
@@ -90,6 +98,13 @@ func (r *SessionRepositoryImpl) Delete(ctx context.Context, tokenHash string) er
 func (r *SessionRepositoryImpl) DeleteExpired(ctx context.Context, now time.Time) error {
 	if _, err := r.client.ExecContext(ctx, "DELETE FROM sessions WHERE expires_at < ?", now.Unix()); err != nil {
 		return fmt.Errorf("delete expired sessions: %w", err)
+	}
+	return nil
+}
+
+func (r *SessionRepositoryImpl) DeleteOthers(ctx context.Context, userId, keepHash string) error {
+	if _, err := r.client.ExecContext(ctx, "DELETE FROM sessions WHERE user_id = ? AND token_hash != ?", userId, keepHash); err != nil {
+		return fmt.Errorf("delete other sessions: %w", err)
 	}
 	return nil
 }

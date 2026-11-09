@@ -60,13 +60,13 @@ func TestBuildResults_Empty(t *testing.T) {
 	assert.Equal(t, "€", got.Symbol)
 }
 
-func TestResultsData_CurrencyOptions(t *testing.T) {
-	got := resultsData{Currency: models.CurrencyUSD}.CurrencyOptions()
-	assert.Equal(t, []currencyOption{
-		{Code: "EUR", Symbol: "€"},
-		{Code: "USD", Symbol: "$", Selected: true},
-		{Code: "GBP", Symbol: "£"},
-	}, got)
+func TestAccountView_CurrencyOptions(t *testing.T) {
+	got := accountView{Currency: "USD"}.CurrencyOptions()
+	require.Len(t, got, len(models.Currencies))
+	assert.Equal(t, currencyOption{Code: "EUR", Label: "EUR (€)"}, got[0])
+	assert.Equal(t, currencyOption{Code: "USD", Label: "USD ($)", Selected: true}, got[1])
+	assert.Equal(t, currencyOption{Code: "CHF", Label: "CHF"}, got[3], "no symbol repeated when it's the code")
+	assert.Equal(t, currencyOption{Code: "SEK", Label: "SEK (kr)"}, got[10])
 }
 
 func TestFormValues_OccurredAt(t *testing.T) {

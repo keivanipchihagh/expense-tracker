@@ -57,7 +57,7 @@ var templateFuncs = template.FuncMap{
 // pages are parsed once: each page gets the layout and the shared partials.
 var pages = func() map[string]*template.Template {
 	out := map[string]*template.Template{}
-	for _, page := range []string{"index.html", "login.html", "apps.html", "analysis.html", "authorize.html", "error.html"} {
+	for _, page := range []string{"index.html", "login.html", "signup.html", "settings.html", "apps.html", "analysis.html", "authorize.html", "error.html"} {
 		out[page] = template.Must(template.New(page).Funcs(templateFuncs).ParseFS(webFS,
 			"web/templates/layout.html", "web/templates/results.html", "web/templates/form.html", "web/templates/"+page))
 	}
@@ -81,7 +81,7 @@ func (s *Server) LoginPage(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
-	s.renderPage(w, http.StatusOK, "login.html", pageData{Title: "Sign in"})
+	s.renderPage(w, http.StatusOK, "login.html", pageData{Title: "Sign in", SignupEnabled: s.handler.SignupEnabled()})
 }
 
 // LoginSubmit handles POST /login.
@@ -95,16 +95,20 @@ func (s *Server) LoginSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, expiresAt, err := s.handler.Login(r.Context(), r.PostForm.Get("password"))
+	email := r.PostForm.Get("email")
+	page := func(status int, msg string) {
+		s.renderPage(w, status, "login.html", pageData{Title: "Sign in", Error: msg, Form: map[string]string{"email": email}, SignupEnabled: s.handler.SignupEnabled()})
+	}
+	token, expiresAt, err := s.handler.Login(r.Context(), email, r.PostForm.Get("password"))
 	switch {
 	case errors.Is(err, handler.ErrWrongPassword):
-		s.renderPage(w, http.StatusUnauthorized, "login.html", pageData{Title: "Sign in", Error: "Wrong password."})
+		page(http.StatusUnauthorized, "Wrong email or password.")
 		return
 	case errors.Is(err, handler.ErrTooManyLogins):
-		s.renderPage(w, http.StatusTooManyRequests, "login.html", pageData{Title: "Sign in", Error: "Too many failed sign-ins. Try again in 15 minutes."})
+		page(http.StatusTooManyRequests, "Too many failed sign-ins for this email. Try again in 15 minutes.")
 		return
 	case err != nil:
-		s.renderPage(w, http.StatusInternalServerError, "login.html", pageData{Title: "Sign in", Error: "Something went wrong. Try again."})
+		page(http.StatusInternalServerError, "Something went wrong. Try again.")
 		return
 	}
 
@@ -135,11 +139,10 @@ func (s *Server) IndexPage(w http.ResponseWriter, r *http.Request) {
 		s.renderUiError(w, r, err)
 		return
 	}
-	s.renderPage(w, http.StatusOK, "index.html", pageData{
-		Title:    "Expenses",
-		SignedIn: true,
-		Nav:      "expenses",
-		Results:  results,
+	s.renderSignedIn(w, r, http.StatusOK, "index.html", pageData{
+		Title:   "Expenses",
+		Nav:     "expenses",
+		Results: results,
 	})
 }
 
@@ -211,7 +214,7 @@ func (s *Server) saveExpense(w http.ResponseWriter, r *http.Request, id string) 
 		http.Error(w, "bad form", http.StatusBadRequest)
 		return
 	}
-	rng := filterFromQuery(r.PostForm, time.Now())
+	rng := filterFromExpenseForm(r.PostForm, time.Now())
 	values := formValuesFromForm(r.PostForm)
 
 	input, fieldErrors := values.toInput()
@@ -239,25 +242,6 @@ func (s *Server) saveExpense(w http.ResponseWriter, r *http.Request, id string) 
 		return
 	}
 	s.renderSaved(w, r, rng)
-}
-
-// SetCurrencySubmit handles POST /ui/currency: it changes the display
-// currency and reloads the page so every amount shows the new symbol.
-func (s *Server) SetCurrencySubmit(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "bad form", http.StatusBadRequest)
-		return
-	}
-	if err := s.handler.SetDisplayCurrency(r.Context(), models.Currency(r.PostForm.Get("currency"))); err != nil {
-		s.renderUiError(w, r, err)
-		return
-	}
-	if r.Header.Get("HX-Request") == "true" {
-		w.Header().Set("HX-Refresh", "true")
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 // currencySymbol is the display currency's symbol for forms. It falls back
@@ -289,7 +273,8 @@ func (s *Server) requireSession(next http.HandlerFunc) http.HandlerFunc {
 			http.Error(w, "cross-origin request rejected", http.StatusForbidden)
 			return
 		}
-		if !s.signedIn(r) {
+		uid := s.sessionUser(r)
+		if uid == "" {
 			if r.Header.Get("HX-Request") == "true" {
 				w.Header().Set("HX-Redirect", "/login")
 				w.WriteHeader(http.StatusUnauthorized)
@@ -298,7 +283,8 @@ func (s *Server) requireSession(next http.HandlerFunc) http.HandlerFunc {
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
 			return
 		}
-		next(w, r)
+		// Everything downstream acts as this user.
+		next(w, r.WithContext(pkg.WithUserId(r.Context(), uid)))
 	}
 }
 
@@ -309,17 +295,36 @@ func (s *Server) cookieName() string {
 	return sessionCookieName
 }
 
-func (s *Server) signedIn(r *http.Request) bool {
+func (s *Server) signedIn(r *http.Request) bool { return s.sessionUser(r) != "" }
+
+// sessionUser returns the user the session cookie belongs to, or "".
+func (s *Server) sessionUser(r *http.Request) string {
 	c, err := r.Cookie(s.cookieName())
 	if err != nil {
-		return false
+		return ""
 	}
-	ok, err := s.handler.ValidateSession(r.Context(), c.Value)
+	uid, ok, err := s.handler.ValidateSession(r.Context(), c.Value)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "session check failed", "error", err)
-		return false
+		return ""
 	}
-	return ok
+	if !ok {
+		return ""
+	}
+	return uid
+}
+
+// renderSignedIn renders a page for the signed-in user, with their profile
+// menu in the top bar.
+func (s *Server) renderSignedIn(w http.ResponseWriter, r *http.Request, status int, page string, data pageData) {
+	user, err := s.handler.CurrentUser(r.Context())
+	if err != nil {
+		s.renderUiError(w, r, err)
+		return
+	}
+	data.SignedIn = true
+	data.Profile = &user
+	s.renderPage(w, status, page, data)
 }
 
 // sessionCookie is HttpOnly so scripts can't read it, and SameSite=Strict so
@@ -408,7 +413,7 @@ type pageData struct {
 	SignedIn bool
 	// Status is the HTTP status shown on the error page.
 	Status int
-	// Nav marks the active top-bar link: "expenses", "analysis" or "apps".
+	// Nav marks the active page: "expenses", "analysis", "apps" or "settings".
 	Nav      string
 	Error    string
 	Results  resultsData
@@ -416,6 +421,18 @@ type pageData struct {
 	Analysis analysisData
 	// Authorize is the OAuth login page; nil on its error page.
 	Authorize *loginPage
+	// Profile is the signed-in user, for the profile menu in the top bar.
+	Profile *models.User
+	// SignupEnabled shows the sign-up link on the sign-in page.
+	SignupEnabled bool
+	// Form holds submitted values to show again, keyed by field name.
+	Form map[string]string
+	// Errors maps form fields to what's wrong with them.
+	Errors map[string]string
+	// Notice is a success message, e.g. "Saved."
+	Notice string
+	// Account is the signed-in user on the account page.
+	Account *accountView
 }
 
 // appRow is a connected app as shown on the apps page.
@@ -457,7 +474,7 @@ func (s *Server) AppsPage(w http.ResponseWriter, r *http.Request) {
 		s.renderUiError(w, r, err)
 		return
 	}
-	s.renderPage(w, http.StatusOK, "apps.html", pageData{Title: "Connected apps", SignedIn: true, Nav: "apps", Apps: appRows(apps)})
+	s.renderSignedIn(w, r, http.StatusOK, "apps.html", pageData{Title: "Connected apps", Nav: "apps", Apps: appRows(apps)})
 }
 
 // RevokeAppSubmit handles POST /ui/apps/{id}/revoke. The empty response
@@ -532,6 +549,19 @@ func filterFromQuery(v url.Values, now time.Time) listFilter {
 		f.Merchant = string(r[:models.MaxMerchantLength])
 	}
 	return f
+}
+
+// filterFromExpenseForm reads the list's filters from the add/edit form.
+// The expense has category and merchant fields of its own, so the form
+// sends the list's as filter_category and filter_merchant.
+func filterFromExpenseForm(v url.Values, now time.Time) listFilter {
+	q := url.Values{"category": {v.Get("filter_category")}, "merchant": {v.Get("filter_merchant")}}
+	for _, key := range []string{"from", "to"} {
+		if v.Has(key) {
+			q.Set(key, v.Get(key))
+		}
+	}
+	return filterFromQuery(q, now)
 }
 
 // Active reports whether a category or merchant filter is set.
@@ -706,22 +736,6 @@ type formData struct {
 
 // Categories feeds the form's category select box.
 func (formData) Categories() []string { return toStrings(models.Categories) }
-
-// currencyOption is one entry of the display currency select box.
-type currencyOption struct {
-	Code     string
-	Symbol   string
-	Selected bool
-}
-
-// CurrencyOptions feeds the display currency select box.
-func (d resultsData) CurrencyOptions() []currencyOption {
-	out := make([]currencyOption, len(models.Currencies))
-	for i, c := range models.Currencies {
-		out[i] = currencyOption{Code: string(c), Symbol: c.Symbol(), Selected: c == d.Currency}
-	}
-	return out
-}
 
 // CategoryOptions feeds the category filter's select box.
 func (resultsData) CategoryOptions() []string { return toStrings(models.Categories) }

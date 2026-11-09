@@ -13,6 +13,7 @@ func TestNewLog(t *testing.T) {
 	tests := []struct {
 		name      string
 		expenseId string
+		userId    string // "-" means empty; otherwise "u1"
 		action    LogAction
 		before    json.RawMessage
 		after     json.RawMessage
@@ -22,6 +23,7 @@ func TestNewLog(t *testing.T) {
 		{name: "update with both", expenseId: "e1", action: LogActionUpdate, before: snapshot, after: snapshot},
 		{name: "delete with before", expenseId: "e1", action: LogActionDelete, before: snapshot},
 		{name: "empty expense id", expenseId: "", action: LogActionCreate, after: snapshot, wantPanic: true},
+		{name: "empty user id", expenseId: "e1", userId: "-", action: LogActionCreate, after: snapshot, wantPanic: true},
 		{name: "create with before", expenseId: "e1", action: LogActionCreate, before: snapshot, after: snapshot, wantPanic: true},
 		{name: "create without after", expenseId: "e1", action: LogActionCreate, wantPanic: true},
 		{name: "update without before", expenseId: "e1", action: LogActionUpdate, after: snapshot, wantPanic: true},
@@ -32,14 +34,19 @@ func TestNewLog(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			build := func() { NewLog(tt.expenseId, tt.action, tt.before, tt.after) }
+			uid := "u1"
+			if tt.userId == "-" {
+				uid = ""
+			}
+			build := func() { NewLog(tt.expenseId, uid, tt.action, tt.before, tt.after) }
 			if tt.wantPanic {
 				assert.Panics(t, build)
 				return
 			}
 
-			l := NewLog(tt.expenseId, tt.action, tt.before, tt.after)
+			l := NewLog(tt.expenseId, uid, tt.action, tt.before, tt.after)
 			assert.Equal(t, tt.expenseId, l.ExpenseId)
+			assert.Equal(t, "u1", l.UserId)
 			assert.Equal(t, tt.action, l.Action)
 			assert.False(t, l.CreatedAt.IsZero())
 			assert.Equal(t, "UTC", l.CreatedAt.Location().String())

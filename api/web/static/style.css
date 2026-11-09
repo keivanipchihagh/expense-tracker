@@ -305,9 +305,10 @@ input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible
 }
 
 .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
-.kpi { padding: 16px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); min-width: 0; }
+.kpi { padding: 16px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); min-width: 0; container-type: inline-size; }
 .kpi-label { color: var(--muted); font-size: .85rem; }
-.kpi-value { font-size: 1.5rem; font-weight: 650; letter-spacing: -0.02em; line-height: 1.3; }
+/* Shrinks with the tile so a long amount like "CHF 12345.60" stays on one line. */
+.kpi-value { font-size: clamp(1rem, 15cqi, 1.5rem); white-space: nowrap; font-weight: 650; letter-spacing: -0.02em; line-height: 1.3; }
 .kpi-sub { color: var(--muted); font-size: .8rem; line-height: 1.4; }
 .delta { font-weight: 600; }
 .delta.up { color: var(--danger); }
@@ -400,7 +401,7 @@ input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible
 .sheet-head h2 { font-size: 1.1rem; font-weight: 600; }
 
 .amount-field { display: flex; align-items: center; gap: 8px; padding: 6px; border: 1px solid var(--border); border-radius: var(--radius); }
-.amount-symbol { padding: 0 4px 0 10px; color: var(--muted); font-size: 1.75rem; font-weight: 650; }
+.amount-symbol { padding: 0 4px 0 10px; white-space: nowrap; color: var(--muted); font-size: 1.75rem; font-weight: 650; }
 .amount-field input { border: 0; min-height: 48px; font-size: 1.75rem; font-weight: 650; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 .amount-field input:focus { box-shadow: none; }
 .amount-field:focus-within { border-color: var(--text); box-shadow: 0 0 0 3px color-mix(in srgb, var(--text) 12%, transparent); }
@@ -430,6 +431,32 @@ input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible
 .login form { display: grid; gap: 10px; text-align: left; }
 .login .alert { text-align: left; }
 .login-note { margin-top: 16px; font-size: .85rem; }
+.login-note a { color: var(--text); text-underline-offset: 3px; }
+.login label { display: grid; gap: 4px; }
+
+/* Account page */
+.account-form { display: grid; gap: 14px; max-width: 420px; }
+.account-form label { display: grid; gap: 6px; }
+.account-form label > span { color: var(--muted); font-size: .85rem; }
+.account-form .form-actions { display: flex; }
+.notice { margin-bottom: 16px; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--subtle); font-size: .9rem; }
+.field-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.account-form .readonly { background: var(--subtle); color: var(--muted); cursor: default; }
+.account-form .readonly:focus { border-color: var(--border); box-shadow: none; }
+
+/* Profile menu: initials in a circle; the menu holds the account links. */
+.profile-menu { position: relative; margin-left: 4px; }
+.avatar-button { list-style: none; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 999px; background: var(--subtle); border: 1px solid var(--border); color: var(--text); font-size: .75rem; font-weight: 650; letter-spacing: .02em; cursor: pointer; user-select: none; }
+.avatar-button::-webkit-details-marker { display: none; }
+.avatar-button:hover, .profile-menu[open] .avatar-button, .avatar-button.active { border-color: var(--text); }
+.profile-menu .menu { position: absolute; right: 0; top: calc(100% + 8px); z-index: 10; display: grid; min-width: 220px; padding: 4px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); box-shadow: var(--shadow); }
+.menu-head { display: grid; gap: 1px; padding: 8px 10px 10px; margin-bottom: 4px; border-bottom: 1px solid var(--border); }
+.menu-name { font-weight: 600; font-size: .9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.menu-sub { color: var(--muted); font-size: .8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.profile-menu .menu a, .profile-menu .menu-item { display: block; width: 100%; height: auto; padding: 8px 10px; border: 0; border-radius: 6px; background: transparent; color: var(--text); font-size: .9rem; font-weight: 400; text-align: left; text-decoration: none; justify-content: flex-start; }
+.profile-menu .menu a:hover, .profile-menu .menu-item:hover, .profile-menu .menu a:focus-visible { background: var(--subtle); }
+.profile-menu .menu a.current { font-weight: 600; }
+.profile-menu .menu form { margin: 0; }
 
 @keyframes fade { from { opacity: 0; } }
 @keyframes rise { from { opacity: 0; transform: translateY(8px) scale(0.98); } }

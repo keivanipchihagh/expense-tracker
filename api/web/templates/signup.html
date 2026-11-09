@@ -1,0 +1,40 @@
+{{define "signup.html"}}{{template "layout" .}}{{end}}
+
+{{define "content"}}
+<section class="login">
+  {{template "logo" "large"}}
+  <h1>Create an account</h1>
+  {{if .SignupEnabled}}
+  <p class="muted">Your expenses are private to your account.</p>
+  {{if .Error}}<p class="alert" role="alert">{{.Error}}</p>{{end}}
+  <form method="post" action="/signup">
+    <div class="field-pair">
+      <label class="{{if index .Errors "first_name"}}invalid{{end}}">
+        <span class="sr-only">First name</span>
+        <input name="first_name" value="{{index .Form "first_name"}}" placeholder="First name" autocomplete="given-name" maxlength="50" required autofocus>
+        {{with index .Errors "first_name"}}<small class="field-error">First name {{.}}</small>{{end}}
+      </label>
+      <label class="{{if index .Errors "last_name"}}invalid{{end}}">
+        <span class="sr-only">Last name</span>
+        <input name="last_name" value="{{index .Form "last_name"}}" placeholder="Last name" autocomplete="family-name" maxlength="50" required>
+        {{with index .Errors "last_name"}}<small class="field-error">Last name {{.}}</small>{{end}}
+      </label>
+    </div>
+    <label class="{{if index .Errors "email"}}invalid{{end}}">
+      <span class="sr-only">Email</span>
+      <input type="email" name="email" value="{{index .Form "email"}}" placeholder="Email" autocomplete="email" required>
+      {{with index .Errors "email"}}<small class="field-error">Email {{.}}</small>{{end}}
+    </label>
+    <label class="{{if index .Errors "password"}}invalid{{end}}">
+      <span class="sr-only">Password</span>
+      <input type="password" name="password" placeholder="Password (at least 10 characters)" autocomplete="new-password" minlength="10" required>
+      {{with index .Errors "password"}}<small class="field-error">Password {{.}}</small>{{end}}
+    </label>
+    <button type="submit" class="primary block">Create account</button>
+  </form>
+  {{else}}
+  <p class="alert" role="alert">Sign-up is turned off on this server.</p>
+  {{end}}
+  <p class="login-note muted">Already have an account? <a href="/login">Sign in</a></p>
+</section>
+{{end}}

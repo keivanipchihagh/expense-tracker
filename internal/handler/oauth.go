@@ -30,10 +30,15 @@ const (
 	maxRedirectUris  = 10
 	maxClientNameLen = 100
 
-	// After maxFailedLogins wrong passwords within failedLoginWindow, the
-	// login page refuses all attempts until the window has passed.
+	// After maxFailedLogins wrong passwords for one email within
+	// failedLoginWindow, sign-in for that email is refused until the window
+	// has passed. Other accounts are unaffected.
 	maxFailedLogins   = 10
 	failedLoginWindow = 15 * time.Minute
+
+	// Sign-up is open (unless disabled), so it is capped too.
+	maxSignups   = 20
+	signupWindow = time.Hour
 
 	// Registration is open, so it is capped: at most maxRegistrations new
 	// clients per registrationWindow.
@@ -48,8 +53,9 @@ var codeChallengePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
 var codeVerifierPattern = regexp.MustCompile(`^[A-Za-z0-9._~-]{43,128}$`)
 
 var (
-	// ErrWrongPassword is returned by Authorize when the password is wrong.
-	ErrWrongPassword = errors.New("wrong password")
+	// ErrWrongPassword is returned when the email or password is wrong. It
+	// doesn't say which, so it can't be used to find accounts.
+	ErrWrongPassword = errors.New("wrong email or password")
 	// ErrTooManyLogins is returned by Authorize while failed logins are locked out.
 	ErrTooManyLogins = errors.New("too many failed logins, try again later")
 )
@@ -188,29 +194,27 @@ func (h *Handler) CheckAuthorizeRequest(ctx context.Context, req AuthorizeReques
 	return client, nil
 }
 
-// Authorize checks the password and, if it is right, issues an authorization
-// code and returns the URL to redirect the browser to. Besides the errors of
-// CheckAuthorizeRequest it returns ErrWrongPassword and ErrTooManyLogins.
-func (h *Handler) Authorize(ctx context.Context, req AuthorizeRequest, password string) (string, error) {
+// Authorize signs the user in and, if the email and password are right,
+// issues an authorization code for them and returns the URL to redirect the
+// browser to. Besides the errors of CheckAuthorizeRequest it returns
+// ErrWrongPassword and ErrTooManyLogins.
+func (h *Handler) Authorize(ctx context.Context, req AuthorizeRequest, email, password string) (string, error) {
 	client, err := h.CheckAuthorizeRequest(ctx, req)
 	if err != nil {
 		return "", err
 	}
 
-	now := h.now()
-	if h.logins.full(now) {
-		return "", ErrTooManyLogins
-	}
-	if !secretsEqual(password, h.password) {
-		h.logins.record(now)
-		h.logger.WarnContext(ctx, "oauth login failed: wrong password", "client_id", client.Id)
-		return "", ErrWrongPassword
+	user, err := h.Authenticate(ctx, email, password)
+	if err != nil {
+		return "", err
 	}
 
+	now := h.now()
 	code := randomToken()
 	err = h.oauthRepo.CreateCode(ctx, models.OAuthCode{
 		CodeHash:      hashSecret(code),
 		ClientId:      client.Id,
+		UserId:        user.Id,
 		RedirectUri:   req.RedirectUri,
 		CodeChallenge: req.CodeChallenge,
 		ExpiresAt:     now.Add(authCodeTTL).UTC(),
@@ -220,7 +224,7 @@ func (h *Handler) Authorize(ctx context.Context, req AuthorizeRequest, password 
 		return "", pkg.InternalError
 	}
 
-	h.logger.InfoContext(ctx, "oauth login succeeded", "client_id", client.Id, "client_name", client.Name)
+	h.logger.InfoContext(ctx, "oauth login succeeded", "client_id", client.Id, "client_name", client.Name, "user_id", user.Id)
 	return redirectWithParams(req.RedirectUri, url.Values{"code": {code}, "state": {req.State}, "iss": {h.publicUrl}}), nil
 }
 
@@ -252,9 +256,14 @@ func (h *Handler) Token(ctx context.Context, req TokenRequest) (TokenResponse, e
 	}
 }
 
-// ListConnectedApps returns the apps that currently hold a valid token.
+// ListConnectedApps returns the apps that currently hold a valid token for
+// the signed-in user.
 func (h *Handler) ListConnectedApps(ctx context.Context) ([]models.ConnectedApp, error) {
-	apps, err := h.oauthRepo.ListConnectedApps(ctx, h.now())
+	uid, err := userId(ctx)
+	if err != nil {
+		return nil, err
+	}
+	apps, err := h.oauthRepo.ListConnectedApps(ctx, uid, h.now())
 	if err != nil {
 		h.logger.ErrorContext(ctx, "list connected apps failed", "error", err)
 		return nil, pkg.InternalError
@@ -262,10 +271,14 @@ func (h *Handler) ListConnectedApps(ctx context.Context) ([]models.ConnectedApp,
 	return apps, nil
 }
 
-// RevokeApp removes an app with all its tokens. Its next request fails with
-// 401 and it has to sign in again.
+// RevokeApp removes the signed-in user's tokens for an app. Its next request
+// on their behalf fails with 401 and it has to sign in again.
 func (h *Handler) RevokeApp(ctx context.Context, clientId string) error {
-	err := h.oauthRepo.DeleteClient(ctx, clientId)
+	uid, err := userId(ctx)
+	if err != nil {
+		return err
+	}
+	err = h.oauthRepo.RevokeClient(ctx, uid, clientId)
 	if errors.Is(err, repositories.ErrOAuthNotFound) {
 		return pkg.ErrAppNotFound
 	}
@@ -277,17 +290,20 @@ func (h *Handler) RevokeApp(ctx context.Context, clientId string) error {
 	return nil
 }
 
-// ValidateAccessToken reports whether token is a current access token. An
-// error means the check itself failed.
-func (h *Handler) ValidateAccessToken(ctx context.Context, token string) (bool, error) {
+// ValidateAccessToken returns the user a current access token belongs to,
+// and whether it is current. An error means the check itself failed.
+func (h *Handler) ValidateAccessToken(ctx context.Context, token string) (string, bool, error) {
 	t, err := h.oauthRepo.GetToken(ctx, hashSecret(token), models.OAuthTokenAccess)
 	if errors.Is(err, repositories.ErrOAuthNotFound) {
-		return false, nil
+		return "", false, nil
 	}
 	if err != nil {
-		return false, err
+		return "", false, err
 	}
-	return h.now().Before(t.ExpiresAt), nil
+	if t.UserId == "" || !h.now().Before(t.ExpiresAt) {
+		return "", false, nil
+	}
+	return t.UserId, true, nil
 }
 
 func (h *Handler) authenticateClient(ctx context.Context, clientId, secret string) (models.OAuthClient, error) {
@@ -327,7 +343,7 @@ func (h *Handler) exchangeCode(ctx context.Context, client models.OAuthClient, r
 		!secretsEqual(pkceChallenge(req.CodeVerifier), code.CodeChallenge):
 		return TokenResponse{}, invalid
 	}
-	return h.issueTokens(ctx, client)
+	return h.issueTokens(ctx, client, code.UserId)
 }
 
 func (h *Handler) refresh(ctx context.Context, client models.OAuthClient, req TokenRequest) (TokenResponse, error) {
@@ -357,16 +373,16 @@ func (h *Handler) refresh(ctx context.Context, client models.OAuthClient, req To
 		h.logger.ErrorContext(ctx, "consume refresh token failed", "error", err)
 		return TokenResponse{}, pkg.NewOAuthError(http.StatusInternalServerError, "server_error", "internal server error")
 	}
-	return h.issueTokens(ctx, client)
+	return h.issueTokens(ctx, client, t.UserId)
 }
 
-func (h *Handler) issueTokens(ctx context.Context, client models.OAuthClient) (TokenResponse, error) {
+func (h *Handler) issueTokens(ctx context.Context, client models.OAuthClient, userId string) (TokenResponse, error) {
 	now := h.now().UTC()
 	access, refresh := randomToken(), randomToken()
 
 	err := h.oauthRepo.CreateTokens(ctx,
-		models.OAuthToken{TokenHash: hashSecret(access), Kind: models.OAuthTokenAccess, ClientId: client.Id, ExpiresAt: now.Add(accessTokenTTL), CreatedAt: now},
-		models.OAuthToken{TokenHash: hashSecret(refresh), Kind: models.OAuthTokenRefresh, ClientId: client.Id, ExpiresAt: now.Add(refreshTokenTTL), CreatedAt: now},
+		models.OAuthToken{TokenHash: hashSecret(access), Kind: models.OAuthTokenAccess, ClientId: client.Id, UserId: userId, ExpiresAt: now.Add(accessTokenTTL), CreatedAt: now},
+		models.OAuthToken{TokenHash: hashSecret(refresh), Kind: models.OAuthTokenRefresh, ClientId: client.Id, UserId: userId, ExpiresAt: now.Add(refreshTokenTTL), CreatedAt: now},
 	)
 	if err != nil {
 		h.logger.ErrorContext(ctx, "create oauth tokens failed", "error", err)
@@ -378,7 +394,7 @@ func (h *Handler) issueTokens(ctx context.Context, client models.OAuthClient) (T
 		h.logger.WarnContext(ctx, "delete expired oauth records failed", "error", err)
 	}
 
-	h.logger.InfoContext(ctx, "oauth tokens issued", "client_id", client.Id)
+	h.logger.InfoContext(ctx, "oauth tokens issued", "client_id", client.Id, "user_id", userId)
 	return TokenResponse{
 		AccessToken:  access,
 		TokenType:    "Bearer",
@@ -523,4 +539,49 @@ func (l *rateLimiter) prune(now time.Time) {
 		i++
 	}
 	l.events = l.events[i:]
+}
+
+// keyedLimiter is a rateLimiter per key (here: per email), so failed logins
+// for one account don't lock out the others.
+type keyedLimiter struct {
+	mu       sync.Mutex
+	max      int
+	window   time.Duration
+	limiters map[string]*rateLimiter
+}
+
+func newKeyedLimiter(max int, window time.Duration) *keyedLimiter {
+	return &keyedLimiter{max: max, window: window, limiters: map[string]*rateLimiter{}}
+}
+
+func (k *keyedLimiter) get(key string) *rateLimiter {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	l, ok := k.limiters[key]
+	if !ok {
+		// Drop keys whose window has emptied, so the map doesn't grow
+		// with every email ever tried.
+		if len(k.limiters) > 1000 {
+			now := time.Now()
+			for key, l := range k.limiters {
+				if !l.full(now) && l.empty(now) {
+					delete(k.limiters, key)
+				}
+			}
+		}
+		l = newRateLimiter(k.max, k.window)
+		k.limiters[key] = l
+	}
+	return l
+}
+
+func (k *keyedLimiter) full(key string, now time.Time) bool { return k.get(key).full(now) }
+func (k *keyedLimiter) record(key string, now time.Time)    { k.get(key).record(now) }
+
+// empty reports whether the window holds no events.
+func (l *rateLimiter) empty(now time.Time) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.prune(now)
+	return len(l.events) == 0
 }

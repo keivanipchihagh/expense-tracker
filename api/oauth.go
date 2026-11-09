@@ -105,13 +105,14 @@ func (s *Server) AuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 	req := authorizeRequestFrom(r.PostForm)
 
-	redirect, err := s.handler.Authorize(r.Context(), req, r.PostForm.Get("password"))
+	email := r.PostForm.Get("email")
+	redirect, err := s.handler.Authorize(r.Context(), req, email, r.PostForm.Get("password"))
 	switch {
 	case errors.Is(err, handler.ErrWrongPassword):
 		client, _ := s.handler.CheckAuthorizeRequest(r.Context(), req)
-		s.renderLogin(w, http.StatusUnauthorized, loginPage{Client: client, Request: req, Error: "Wrong password."})
+		s.renderLogin(w, http.StatusUnauthorized, loginPage{Client: client, Request: req, Email: email, Error: "Wrong email or password."})
 	case errors.Is(err, handler.ErrTooManyLogins):
-		s.renderAuthorizeError(w, http.StatusTooManyRequests, "Too many failed logins. Try again in 15 minutes.")
+		s.renderAuthorizeError(w, http.StatusTooManyRequests, "Too many failed sign-ins for this email. Try again in 15 minutes.")
 	case err != nil:
 		s.writeAuthorizeError(w, r, req, err)
 	default:
@@ -202,7 +203,9 @@ func unescapeBasic(s string) string {
 type loginPage struct {
 	Client  models.OAuthClient
 	Request handler.AuthorizeRequest
-	Error   string
+	// Email is shown again after a failed attempt.
+	Email string
+	Error string
 }
 
 // redirectHost is shown on the login page so a login link that would send

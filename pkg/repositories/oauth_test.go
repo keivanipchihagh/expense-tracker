@@ -52,7 +52,7 @@ func TestOAuthRepository_Clients(t *testing.T) {
 func TestOAuthRepository_ConsumeCodeOnce(t *testing.T) {
 	repo := newTestOAuthRepo(t)
 	ctx := context.Background()
-	code := models.OAuthCode{CodeHash: "h", ClientId: "c", RedirectUri: "https://a/cb", CodeChallenge: "ch", ExpiresAt: oauthNow}
+	code := models.OAuthCode{CodeHash: "h", ClientId: "c", UserId: "user-1", RedirectUri: "https://a/cb", CodeChallenge: "ch", ExpiresAt: oauthNow}
 
 	require.NoError(t, repo.CreateCode(ctx, code))
 
@@ -67,8 +67,8 @@ func TestOAuthRepository_ConsumeCodeOnce(t *testing.T) {
 func TestOAuthRepository_Tokens(t *testing.T) {
 	repo := newTestOAuthRepo(t)
 	ctx := context.Background()
-	access := models.OAuthToken{TokenHash: "a", Kind: models.OAuthTokenAccess, ClientId: "c", ExpiresAt: oauthNow.Add(time.Hour), CreatedAt: oauthNow}
-	refresh := models.OAuthToken{TokenHash: "r", Kind: models.OAuthTokenRefresh, ClientId: "c", ExpiresAt: oauthNow.Add(time.Hour), CreatedAt: oauthNow}
+	access := models.OAuthToken{TokenHash: "a", Kind: models.OAuthTokenAccess, ClientId: "c", UserId: "user-1", ExpiresAt: oauthNow.Add(time.Hour), CreatedAt: oauthNow}
+	refresh := models.OAuthToken{TokenHash: "r", Kind: models.OAuthTokenRefresh, ClientId: "c", UserId: "user-1", ExpiresAt: oauthNow.Add(time.Hour), CreatedAt: oauthNow}
 
 	require.NoError(t, repo.CreateTokens(ctx, access, refresh))
 
@@ -110,35 +110,46 @@ func TestOAuthRepository_ConnectedApps(t *testing.T) {
 	for _, id := range []string{"claude", "chatgpt", "idle", "expired"} {
 		require.NoError(t, repo.CreateClient(ctx, models.OAuthClient{Id: id, Name: id, RedirectUris: []string{"https://" + id + "/cb"}, AuthMethod: models.AuthMethodNone, CreatedAt: oauthNow}))
 	}
-	tok := func(hash, client string, created, expires time.Time) models.OAuthToken {
-		return models.OAuthToken{TokenHash: hash, Kind: models.OAuthTokenRefresh, ClientId: client, CreatedAt: created, ExpiresAt: expires}
+	tok := func(hash, client, user string, created, expires time.Time) models.OAuthToken {
+		return models.OAuthToken{TokenHash: hash, Kind: models.OAuthTokenRefresh, ClientId: client, UserId: user, CreatedAt: created, ExpiresAt: expires}
 	}
 	require.NoError(t, repo.CreateTokens(ctx,
-		tok("c1", "claude", oauthNow.Add(-2*time.Hour), oauthNow.Add(time.Hour)),
-		tok("c2", "claude", oauthNow.Add(-time.Hour), oauthNow.Add(time.Hour)),
-		tok("g1", "chatgpt", oauthNow.Add(-30*time.Minute), oauthNow.Add(time.Hour)),
-		tok("e1", "expired", oauthNow.Add(-48*time.Hour), oauthNow.Add(-time.Hour)),
+		tok("c1", "claude", "me", oauthNow.Add(-2*time.Hour), oauthNow.Add(time.Hour)),
+		tok("c2", "claude", "me", oauthNow.Add(-time.Hour), oauthNow.Add(time.Hour)),
+		tok("g1", "chatgpt", "me", oauthNow.Add(-30*time.Minute), oauthNow.Add(time.Hour)),
+		tok("e1", "expired", "me", oauthNow.Add(-48*time.Hour), oauthNow.Add(-time.Hour)),
+		tok("o1", "claude", "other", oauthNow.Add(-time.Minute), oauthNow.Add(time.Hour)),
+		tok("o2", "idle", "other", oauthNow.Add(-time.Minute), oauthNow.Add(time.Hour)),
 	))
 
-	apps, err := repo.ListConnectedApps(ctx, oauthNow)
+	apps, err := repo.ListConnectedApps(ctx, "me", oauthNow)
 	require.NoError(t, err)
-	require.Len(t, apps, 2, "clients without a valid token are not connected")
+	require.Len(t, apps, 2, "only my clients with a valid token")
 	assert.Equal(t, "chatgpt", apps[0].Client.Id, "most recently active first")
 	assert.Equal(t, "claude", apps[1].Client.Id)
-	assert.Equal(t, oauthNow.Add(-time.Hour), apps[1].LastActiveAt)
+	assert.Equal(t, oauthNow.Add(-time.Hour), apps[1].LastActiveAt, "my last activity, not the other user's")
 	assert.Equal(t, []string{"https://claude/cb"}, apps[1].Client.RedirectUris)
 
-	require.NoError(t, repo.CreateCode(ctx, models.OAuthCode{CodeHash: "code", ClientId: "claude", ExpiresAt: oauthNow.Add(time.Minute)}))
-	require.NoError(t, repo.DeleteClient(ctx, "claude"))
+	// Revoking removes my codes and tokens only; the client stays while
+	// someone else still uses it.
+	require.NoError(t, repo.CreateCode(ctx, models.OAuthCode{CodeHash: "code", ClientId: "claude", UserId: "me", ExpiresAt: oauthNow.Add(time.Minute)}))
+	require.NoError(t, repo.RevokeClient(ctx, "me", "claude"))
 
-	_, err = repo.GetClient(ctx, "claude")
-	assert.ErrorIs(t, err, ErrOAuthNotFound)
 	_, err = repo.GetToken(ctx, "c2", models.OAuthTokenRefresh)
-	assert.ErrorIs(t, err, ErrOAuthNotFound, "its tokens are gone")
+	assert.ErrorIs(t, err, ErrOAuthNotFound, "my tokens are gone")
 	_, err = repo.ConsumeCode(ctx, "code")
-	assert.ErrorIs(t, err, ErrOAuthNotFound, "its codes are gone")
+	assert.ErrorIs(t, err, ErrOAuthNotFound, "my codes are gone")
+	_, err = repo.GetToken(ctx, "o1", models.OAuthTokenRefresh)
+	assert.NoError(t, err, "the other user's token survives")
+	_, err = repo.GetClient(ctx, "claude")
+	assert.NoError(t, err, "the client stays while it's in use")
 
-	assert.ErrorIs(t, repo.DeleteClient(ctx, "claude"), ErrOAuthNotFound)
+	assert.ErrorIs(t, repo.RevokeClient(ctx, "me", "claude"), ErrOAuthNotFound, "nothing left to revoke")
+	assert.ErrorIs(t, repo.RevokeClient(ctx, "me", "idle"), ErrOAuthNotFound, "can't revoke another user's app")
+
+	require.NoError(t, repo.RevokeClient(ctx, "other", "claude"))
+	_, err = repo.GetClient(ctx, "claude")
+	assert.ErrorIs(t, err, ErrOAuthNotFound, "the last revoke removes the client")
 }
 
 func TestOAuthRepository_DeleteExpiredRemovesUnusedClients(t *testing.T) {

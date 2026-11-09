@@ -56,9 +56,8 @@ func (s *Server) AnalysisPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.renderPage(w, http.StatusOK, "analysis.html", pageData{
+	s.renderSignedIn(w, r, http.StatusOK, "analysis.html", pageData{
 		Title:    "Analysis",
-		SignedIn: true,
 		Nav:      "analysis",
 		Analysis: buildAnalysis(now, period, scope, current, previous, currency),
 	})

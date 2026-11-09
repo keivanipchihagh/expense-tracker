@@ -50,7 +50,7 @@ func send(t *testing.T, c *http.Client, method, u string, form url.Values, heade
 
 func signIn(t *testing.T, s *testServer, c *http.Client) {
 	t.Helper()
-	status, header, _ := send(t, c, http.MethodPost, s.url+"/login", url.Values{"password": {password}}, nil)
+	status, header, _ := send(t, c, http.MethodPost, s.url+"/login", url.Values{"email": {s.email}, "password": {s.password}}, nil)
 	require.Equal(t, http.StatusSeeOther, status)
 	require.Equal(t, "/", header.Get("Location"))
 }
@@ -79,11 +79,11 @@ func TestUI_Login(t *testing.T) {
 	s := newTestServer(t)
 	c := browser(t)
 
-	status, _, page := send(t, c, http.MethodPost, s.url+"/login", url.Values{"password": {"wrong"}}, nil)
+	status, _, page := send(t, c, http.MethodPost, s.url+"/login", url.Values{"email": {email}, "password": {"wrong"}}, nil)
 	assert.Equal(t, http.StatusUnauthorized, status)
-	assert.Contains(t, page, "Wrong password")
+	assert.Contains(t, page, "Wrong email or password.")
 
-	status, header, _ := send(t, c, http.MethodPost, s.url+"/login", url.Values{"password": {password}}, nil)
+	status, header, _ := send(t, c, http.MethodPost, s.url+"/login", url.Values{"email": {email}, "password": {password}}, nil)
 	require.Equal(t, http.StatusSeeOther, status)
 
 	cookie := header.Get("Set-Cookie")
@@ -254,8 +254,8 @@ func TestUI_Filters(t *testing.T) {
 	// The add form carries the filters so saving returns to the same view.
 	status, _, form := send(t, c, http.MethodGet, s.url+"/ui/expenses/new?from=2026-11-01&to=2026-11-30&category=groceries&merchant=rewe", nil, hx)
 	require.Equal(t, http.StatusOK, status)
-	assert.Contains(t, form, `name="category" value="groceries"`)
-	assert.Contains(t, form, `name="merchant" value="rewe"`)
+	assert.Contains(t, form, `name="filter_category" value="groceries"`)
+	assert.Contains(t, form, `name="filter_merchant" value="rewe"`, "named so they don't clash with the expense's own fields")
 
 	// An unknown category is ignored rather than failing the page.
 	status, _, page = send(t, c, http.MethodGet, s.url+"/?from=2026-11-01&to=2026-11-30&category=pets", nil, nil)
@@ -277,31 +277,26 @@ func TestUI_DisplayCurrency(t *testing.T) {
 	hx := map[string]string{"HX-Request": "true"}
 	monthPage := s.url + "/?from=2026-11-01&to=2026-11-30"
 
-	// EUR until the user picks another one.
-	status, _, page := send(t, c, http.MethodGet, monthPage, nil, nil)
-	require.Equal(t, http.StatusOK, status)
-	assert.Contains(t, page, `<option value="EUR" selected>€ EUR</option>`)
-	assert.Contains(t, page, `<option value="USD" >$ USD</option>`)
-	assert.Contains(t, page, `<option value="GBP" >£ GBP</option>`)
+	// EUR until the user picks another one, on the account page.
+	_, _, page := send(t, c, http.MethodGet, monthPage, nil, nil)
 	assert.Contains(t, page, "€12.50")
-
-	// Picking one reloads the page; every amount then shows its symbol.
-	status, header, _ := send(t, c, http.MethodPost, s.url+"/ui/currency", url.Values{"currency": {"GBP"}}, hx)
-	require.Equal(t, http.StatusNoContent, status)
-	assert.Equal(t, "true", header.Get("HX-Refresh"))
-
-	status, _, page = send(t, c, http.MethodGet, monthPage, nil, nil)
+	assert.NotContains(t, page, `name="currency"`, "the picker lives on the settings page now")
+	status, _, account := send(t, c, http.MethodGet, s.url+"/settings", nil, nil)
 	require.Equal(t, http.StatusOK, status)
-	assert.Contains(t, page, `<option value="GBP" selected>£ GBP</option>`)
+	assert.Contains(t, account, `<option value="EUR" selected>EUR (€)</option>`)
+	assert.Contains(t, account, `<option value="GBP" >GBP (£)</option>`)
+
+	status, _, account = send(t, c, http.MethodPost, s.url+"/settings", url.Values{"currency": {"GBP"}}, nil)
+	require.Equal(t, http.StatusOK, status)
+	assert.Contains(t, account, "Saved.")
+	assert.Contains(t, account, `<option value="GBP" selected>GBP (£)</option>`)
+
+	_, _, page = send(t, c, http.MethodGet, monthPage, nil, nil)
 	assert.Contains(t, page, "£12.50")
 	assert.NotContains(t, page, "€12.50")
-
-	status, _, results := send(t, c, http.MethodGet, s.url+"/ui/expenses?from=2026-11-01&to=2026-11-30", nil, hx)
-	require.Equal(t, http.StatusOK, status)
+	_, _, results := send(t, c, http.MethodGet, s.url+"/ui/expenses?from=2026-11-01&to=2026-11-30", nil, hx)
 	assert.Contains(t, results, "£12.50", "partials use it too")
-
-	status, _, form := send(t, c, http.MethodGet, s.url+"/ui/expenses/new", nil, hx)
-	require.Equal(t, http.StatusOK, status)
+	_, _, form := send(t, c, http.MethodGet, s.url+"/ui/expenses/new", nil, hx)
 	assert.Contains(t, form, `<span class="amount-symbol" aria-hidden="true">£</span>`, "and the add form")
 
 	// Nothing is converted: the stored amount is unchanged.
@@ -310,41 +305,38 @@ func TestUI_DisplayCurrency(t *testing.T) {
 	require.Len(t, listed, 1)
 	assert.Equal(t, "12.50", listed[0]["amount"])
 
-	// The choice is saved on the server, so a new browser session sees it.
+	// It's saved on the account, so another browser sees it.
 	other := browser(t)
 	signIn(t, s, other)
 	_, _, page = send(t, other, http.MethodGet, monthPage, nil, nil)
 	assert.Contains(t, page, "£12.50")
 
-	// Without HTMX (a plain form post) it redirects back to the list.
-	status, header, _ = send(t, c, http.MethodPost, s.url+"/ui/currency", url.Values{"currency": {"USD"}}, nil)
-	require.Equal(t, http.StatusSeeOther, status)
-	assert.Equal(t, "/", header.Get("Location"))
-	_, _, page = send(t, c, http.MethodGet, monthPage, nil, nil)
-	assert.Contains(t, page, "$12.50")
-
 	// Unknown currencies are rejected and change nothing.
-	for _, bad := range []string{"", "JPY", "usd"} {
-		status, _, _ = send(t, c, http.MethodPost, s.url+"/ui/currency", url.Values{"currency": {bad}}, hx)
-		assert.Equal(t, http.StatusUnprocessableEntity, status, bad)
-	}
+	status, _, account = send(t, c, http.MethodPost, s.url+"/settings", url.Values{"currency": {"XYZ"}}, nil)
+	assert.Equal(t, http.StatusUnprocessableEntity, status)
 	_, _, page = send(t, c, http.MethodGet, monthPage, nil, nil)
-	assert.Contains(t, page, "$12.50")
+	assert.Contains(t, page, "£12.50")
 }
 
-func TestUI_DisplayCurrencyNeedsSessionAndSameOrigin(t *testing.T) {
+func TestUI_SettingsNeedSessionAndSameOrigin(t *testing.T) {
 	s := newTestServer(t)
 
-	status, _, _ := send(t, browser(t), http.MethodPost, s.url+"/ui/currency", url.Values{"currency": {"GBP"}}, nil)
-	assert.Equal(t, http.StatusSeeOther, status, "signed-out requests go to the login page")
+	status, header, _ := send(t, browser(t), http.MethodGet, s.url+"/settings", nil, nil)
+	assert.Equal(t, http.StatusSeeOther, status, "signed-out visitors go to the login page")
+	assert.Equal(t, "/login", header.Get("Location"))
+	status, _, _ = send(t, browser(t), http.MethodPost, s.url+"/settings", url.Values{"currency": {"GBP"}}, nil)
+	assert.Equal(t, http.StatusSeeOther, status)
 
 	c := browser(t)
 	signIn(t, s, c)
-	status, _, _ = send(t, c, http.MethodPost, s.url+"/ui/currency", url.Values{"currency": {"GBP"}}, map[string]string{"Sec-Fetch-Site": "cross-site"})
-	assert.Equal(t, http.StatusForbidden, status, "other sites can't change it")
+	crossSite := map[string]string{"Sec-Fetch-Site": "cross-site"}
+	status, _, _ = send(t, c, http.MethodPost, s.url+"/settings", url.Values{"first_name": {"Mallory"}}, crossSite)
+	assert.Equal(t, http.StatusForbidden, status, "other sites can't change your profile")
+	status, _, _ = send(t, c, http.MethodPost, s.url+"/settings/password", url.Values{"current_password": {password}, "new_password": {"attacker-chosen-1"}}, crossSite)
+	assert.Equal(t, http.StatusForbidden, status, "or your password")
 
-	_, _, page := send(t, c, http.MethodGet, s.url+"/", nil, nil)
-	assert.Contains(t, page, `<option value="EUR" selected>€ EUR</option>`, "still the default")
+	_, _, account := send(t, c, http.MethodGet, s.url+"/settings", nil, nil)
+	assert.NotContains(t, account, "Mallory", "unchanged")
 }
 
 func TestUI_Analysis(t *testing.T) {
@@ -403,8 +395,8 @@ func TestUI_Analysis(t *testing.T) {
 	assert.NotContains(t, page, "Where it went")
 
 	// The display currency applies here too.
-	require.Equal(t, http.StatusNoContent, func() int {
-		status, _, _ := send(t, c, http.MethodPost, s.url+"/ui/currency", url.Values{"currency": {"USD"}}, map[string]string{"HX-Request": "true"})
+	require.Equal(t, http.StatusOK, func() int {
+		status, _, _ := send(t, c, http.MethodPost, s.url+"/settings", url.Values{"currency": {"USD"}}, nil)
 		return status
 	}())
 	_, _, page = send(t, c, http.MethodGet, s.url+"/analysis?period=all", nil, nil)
@@ -440,7 +432,7 @@ func TestUI_Export(t *testing.T) {
 	_, _, page := send(t, c, http.MethodGet, s.url+"/?"+november+"&category=groceries", nil, nil)
 	assert.Contains(t, page, `href="/ui/export?category=groceries&amp;format=csv&amp;from=2026-11-01&amp;to=2026-11-30" download>CSV</a>`)
 	assert.Contains(t, page, `href="/ui/export?category=groceries&amp;format=json&amp;from=2026-11-01&amp;to=2026-11-30" download>JSON</a>`)
-	assert.Contains(t, page, `<details class="export-menu">`, "a dropdown in the filter row")
+	assert.Contains(t, page, `<details class="export-menu" data-menu>`, "a dropdown in the filter row")
 	assert.Contains(t, page, `<summary aria-label="Download" title="Download what the list shows">`, "opened by a download icon")
 
 	_, _, empty := send(t, c, http.MethodGet, s.url+"/?from=2027-01-01&to=2027-01-31", nil, nil)
@@ -488,7 +480,7 @@ func TestUI_RejectsCrossOriginPosts(t *testing.T) {
 	status, _, _ := send(t, c, http.MethodPost, s.url+"/ui/expenses", url.Values{"amount": {"1"}}, evil)
 	assert.Equal(t, http.StatusForbidden, status)
 
-	status, _, _ = send(t, c, http.MethodPost, s.url+"/login", url.Values{"password": {password}}, evil)
+	status, _, _ = send(t, c, http.MethodPost, s.url+"/login", url.Values{"email": {email}, "password": {password}}, evil)
 	assert.Equal(t, http.StatusForbidden, status)
 }
 
@@ -498,7 +490,7 @@ func TestUI_AcceptsSameOriginPostsWithNullOrigin(t *testing.T) {
 
 	// What Chrome sends for a form post when the page has Referrer-Policy: no-referrer.
 	headers := map[string]string{"Origin": "null", "Sec-Fetch-Site": "same-origin"}
-	status, _, _ := send(t, c, http.MethodPost, s.url+"/login", url.Values{"password": {password}}, headers)
+	status, _, _ := send(t, c, http.MethodPost, s.url+"/login", url.Values{"email": {email}, "password": {password}}, headers)
 	assert.Equal(t, http.StatusSeeOther, status)
 }
 

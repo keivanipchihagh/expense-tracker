@@ -1,0 +1,57 @@
+{{define "settings.html"}}{{template "layout" .}}{{end}}
+
+{{define "content"}}
+{{$errors := .Errors}}
+<div class="page-head">
+  <h1>Settings</h1>
+</div>
+{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
+
+{{with .Account}}
+<section class="card">
+  <header class="card-head"><h2>Profile</h2></header>
+  <form method="post" action="/settings" class="account-form">
+    <div class="field-pair">
+      <label class="{{if index $errors "first_name"}}invalid{{end}}">
+        <span>First name</span>
+        <input name="first_name" value="{{.FirstName}}" autocomplete="given-name" maxlength="50" required>
+        {{with index $errors "first_name"}}<small class="field-error">{{.}}</small>{{end}}
+      </label>
+      <label class="{{if index $errors "last_name"}}invalid{{end}}">
+        <span>Last name</span>
+        <input name="last_name" value="{{.LastName}}" autocomplete="family-name" maxlength="50" required>
+        {{with index $errors "last_name"}}<small class="field-error">{{.}}</small>{{end}}
+      </label>
+    </div>
+    <label>
+      <span>Email</span>
+      <input type="email" value="{{.Email}}" readonly aria-readonly="true" class="readonly">
+    </label>
+    <label>
+      <span>Display currency (amounts aren't converted)</span>
+      <select name="currency">
+        {{range .CurrencyOptions}}<option value="{{.Code}}" {{if .Selected}}selected{{end}}>{{.Label}}</option>{{end}}
+      </select>
+    </label>
+    <div class="form-actions"><button type="submit" class="primary">Save</button></div>
+  </form>
+</section>
+{{end}}
+
+<section class="card">
+  <header class="card-head"><h2>Password</h2><p class="muted small-text">Changing it signs out your other browsers.</p></header>
+  <form method="post" action="/settings/password" class="account-form">
+    <label class="{{if index $errors "current_password"}}invalid{{end}}">
+      <span>Current password</span>
+      <input type="password" name="current_password" autocomplete="current-password" required>
+      {{with index $errors "current_password"}}<small class="field-error">{{.}}</small>{{end}}
+    </label>
+    <label class="{{if index $errors "new_password"}}invalid{{end}}">
+      <span>New password</span>
+      <input type="password" name="new_password" autocomplete="new-password" minlength="10" required>
+      {{with index $errors "new_password"}}<small class="field-error">{{.}}</small>{{end}}
+    </label>
+    <div class="form-actions"><button type="submit" class="primary">Change password</button></div>
+  </form>
+</section>
+{{end}}

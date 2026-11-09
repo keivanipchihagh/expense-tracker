@@ -24,6 +24,7 @@ const logTableSchema = `
 	CREATE TABLE IF NOT EXISTS logs (
 		id         INTEGER  PRIMARY KEY AUTOINCREMENT,
 		expense_id TEXT     NOT NULL,
+		user_id    TEXT,
 		action     TEXT     NOT NULL CHECK (action IN ('create', 'update', 'delete')),
 		"before"   TEXT,
 		"after"    TEXT,
@@ -39,16 +40,21 @@ func NewLogRepository(ctx context.Context, client *sqlite.Client) (LogRepository
 	if _, err := client.ExecContext(ctx, logTableSchema); err != nil {
 		return nil, fmt.Errorf("create logs table: %w", err)
 	}
+	// Logs from before accounts get their owner with the expenses.
+	if err := addUserIdColumn(ctx, client, "logs", false); err != nil {
+		return nil, err
+	}
 	return &LogRepositoryImpl{}, nil
 }
 
 func (r *LogRepositoryImpl) Create(ctx context.Context, exec sqlite.Executor, log models.Log) error {
 	query := `
-		INSERT INTO logs (expense_id, action, "before", "after", created_at)
-		VALUES (?, ?, ?, ?, ?)
+		INSERT INTO logs (expense_id, user_id, action, "before", "after", created_at)
+		VALUES (?, ?, ?, ?, ?, ?)
 	`
 	_, err := exec.ExecContext(ctx, query,
 		log.ExpenseId,
+		log.UserId,
 		log.Action.String(),
 		nullableJson(log.Before),
 		nullableJson(log.After),

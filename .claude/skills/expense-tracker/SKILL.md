@@ -15,7 +15,7 @@ claude mcp list                                                           # chec
 claude mcp remove expense-tracker                                         # remove
 ```
 
-- On first use the client opens a browser; the user signs in with the server's `AUTH_PASSWORD`. Never ask the user to paste the password or a token into the chat.
+- On first use the client opens a browser; the user signs in with their account's email and password (or signs up first). Never ask the user to paste the password or a token into the chat.
 - `401` or "needs authentication": run `/mcp` in Claude Code and re-authenticate the server.
 - Connection refused: the container is down. Start it from the repo root with `docker compose -f deploy/docker-compose.yaml --env-file .env up -d`.
 - Remote clients (claude.ai, ChatGPT, Gemini) need `PUBLIC_URL` to be a public HTTPS URL.

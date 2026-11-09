@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"github.com/keivanipchihagh/expense-tracker/pkg"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -14,9 +15,10 @@ const internalErrorBody = `{"error":{"code":"internal","message":"internal serve
 // unauthorizedBody is the response body sent for a missing or invalid token.
 const unauthorizedBody = `{"error":{"code":"unauthorized","message":"missing or invalid access token"}}`
 
-// TokenValidator reports whether token is a valid access token. An error
-// means the check itself failed, not that the token is invalid.
-type TokenValidator func(ctx context.Context, token string) (bool, error)
+// TokenValidator returns the user a valid access token belongs to, and
+// whether it is valid. An error means the check itself failed, not that the
+// token is invalid.
+type TokenValidator func(ctx context.Context, token string) (string, bool, error)
 
 // BearerAuthMiddleware requires "Authorization: Bearer <token>" with a valid
 // token on every request whose path isPublic doesn't exempt. A rejection is a
@@ -36,7 +38,7 @@ func BearerAuthMiddleware(validate TokenValidator, isPublic func(path string) bo
 				writeUnauthorized(w, challenge)
 				return
 			}
-			valid, err := validate(r.Context(), token)
+			userId, valid, err := validate(r.Context(), token)
 			if err != nil {
 				slog.ErrorContext(r.Context(), "access token check failed", "error", err)
 				w.Header().Set("Content-Type", "application/json")
@@ -48,7 +50,8 @@ func BearerAuthMiddleware(validate TokenValidator, isPublic func(path string) bo
 				writeUnauthorized(w, challenge+`, error="invalid_token"`)
 				return
 			}
-			h.ServeHTTP(w, r)
+			// Everything downstream acts as this user.
+			h.ServeHTTP(w, r.WithContext(pkg.WithUserId(r.Context(), userId)))
 		})
 	}
 }

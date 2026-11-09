@@ -30,6 +30,10 @@ var writableFields = map[string]bool{
 // CreateExpense validates input and stores a new expense. Input keys are
 // the JSON field names; numbers are json.Number.
 func (h *Handler) CreateExpense(ctx context.Context, input map[string]any) (models.Expense, error) {
+	uid, err := userId(ctx)
+	if err != nil {
+		return models.Expense{}, err
+	}
 	errs := map[string]string{}
 	for _, key := range requiredFields {
 		if _, ok := input[key]; !ok {
@@ -38,7 +42,7 @@ func (h *Handler) CreateExpense(ctx context.Context, input map[string]any) (mode
 	}
 
 	now := time.Now().UTC()
-	expense := models.Expense{Id: uuid.Must(uuid.NewV7()).String(), CreatedAt: now, UpdatedAt: now}
+	expense := models.Expense{Id: uuid.Must(uuid.NewV7()).String(), UserId: uid, CreatedAt: now, UpdatedAt: now}
 	applyInput(&expense, input, errs)
 	if len(errs) > 0 {
 		return models.Expense{}, pkg.NewValidationError(errs)
@@ -56,6 +60,10 @@ func (h *Handler) CreateExpense(ctx context.Context, input map[string]any) (mode
 // ListExpenses returns expenses matching the filter, oldest first. The
 // merchant search is trimmed; an empty one doesn't filter.
 func (h *Handler) ListExpenses(ctx context.Context, filter models.ExpenseFilter) ([]models.Expense, error) {
+	uid, err := userId(ctx)
+	if err != nil {
+		return nil, err
+	}
 	errs := map[string]string{}
 	if !filter.DateFrom.IsZero() && !filter.DateTo.IsZero() && filter.DateTo.Before(filter.DateFrom) {
 		errs["date_to"] = "must not be before date_from"
@@ -71,7 +79,7 @@ func (h *Handler) ListExpenses(ctx context.Context, filter models.ExpenseFilter)
 		return nil, pkg.NewValidationError(errs)
 	}
 
-	expenses, err := h.expenseRepo.List(ctx, filter)
+	expenses, err := h.expenseRepo.List(ctx, uid, filter)
 	if err != nil {
 		h.logger.ErrorContext(ctx, "list expenses failed", "error", err)
 		return nil, pkg.InternalError
@@ -81,7 +89,11 @@ func (h *Handler) ListExpenses(ctx context.Context, filter models.ExpenseFilter)
 
 // GetExpense returns the expense with the given id.
 func (h *Handler) GetExpense(ctx context.Context, id string) (models.Expense, error) {
-	expense, err := h.expenseRepo.Get(ctx, id)
+	uid, err := userId(ctx)
+	if err != nil {
+		return models.Expense{}, err
+	}
+	expense, err := h.expenseRepo.Get(ctx, uid, id)
 	if err != nil {
 		return models.Expense{}, h.repoError(ctx, "get expense failed", err)
 	}
@@ -92,7 +104,11 @@ func (h *Handler) GetExpense(ctx context.Context, id string) (models.Expense, er
 // unchanged and null clears an optional field. A patch that changes nothing
 // returns the expense without writing.
 func (h *Handler) UpdateExpense(ctx context.Context, id string, patch map[string]any) (models.Expense, error) {
-	current, err := h.expenseRepo.Get(ctx, id)
+	uid, err := userId(ctx)
+	if err != nil {
+		return models.Expense{}, err
+	}
+	current, err := h.expenseRepo.Get(ctx, uid, id)
 	if err != nil {
 		return models.Expense{}, h.repoError(ctx, "update expense failed", err)
 	}
@@ -118,7 +134,11 @@ func (h *Handler) UpdateExpense(ctx context.Context, id string, patch map[string
 
 // DeleteExpense permanently removes the expense with the given id.
 func (h *Handler) DeleteExpense(ctx context.Context, id string) error {
-	if err := h.expenseRepo.Delete(ctx, id); err != nil {
+	uid, err := userId(ctx)
+	if err != nil {
+		return err
+	}
+	if err := h.expenseRepo.Delete(ctx, uid, id); err != nil {
 		return h.repoError(ctx, "delete expense failed", err)
 	}
 

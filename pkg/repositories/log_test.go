@@ -74,20 +74,20 @@ func TestLogRepository_Create(t *testing.T) {
 	}{
 		{
 			name:       "create stores after and a null before",
-			log:        *models.NewLog("e1", models.LogActionCreate, nil, snapshot),
+			log:        *models.NewLog("e1", "user-1", models.LogActionCreate, nil, snapshot),
 			wantAction: "create",
 			wantAfter:  sql.NullString{String: string(snapshot), Valid: true},
 		},
 		{
 			name:       "update stores both snapshots",
-			log:        *models.NewLog("e1", models.LogActionUpdate, snapshot, snapshot),
+			log:        *models.NewLog("e1", "user-1", models.LogActionUpdate, snapshot, snapshot),
 			wantAction: "update",
 			wantBefore: sql.NullString{String: string(snapshot), Valid: true},
 			wantAfter:  sql.NullString{String: string(snapshot), Valid: true},
 		},
 		{
 			name:       "delete stores before and a null after",
-			log:        *models.NewLog("e1", models.LogActionDelete, snapshot, nil),
+			log:        *models.NewLog("e1", "user-1", models.LogActionDelete, snapshot, nil),
 			wantAction: "delete",
 			wantBefore: sql.NullString{String: string(snapshot), Valid: true},
 		},
@@ -135,7 +135,7 @@ func TestLogRepository_Create_JoinsTransaction(t *testing.T) {
 
 	errAbort := errors.New("abort")
 	err = client.WithTx(ctx, func(tx *sql.Tx) error {
-		log := models.NewLog("e1", models.LogActionCreate, nil, json.RawMessage(`{}`))
+		log := models.NewLog("e1", "user-1", models.LogActionCreate, nil, json.RawMessage(`{}`))
 		require.NoError(t, repo.Create(ctx, tx, *log))
 		return errAbort
 	})

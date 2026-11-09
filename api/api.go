@@ -75,6 +75,10 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/expenses/{id}", s.GetExpense)
 	mux.HandleFunc("PATCH /api/v1/expenses/{id}", s.UpdateExpense)
 	mux.HandleFunc("DELETE /api/v1/expenses/{id}", s.DeleteExpense)
+	mux.HandleFunc("POST /api/v1/users", s.SignUp)
+	mux.HandleFunc("GET /api/v1/me", s.GetMe)
+	mux.HandleFunc("PATCH /api/v1/me", s.UpdateMe)
+	mux.HandleFunc("PUT /api/v1/me/password", s.ChangeMyPassword)
 
 	// MCP (Streamable HTTP)
 	mux.Handle("/mcp", s.NewMcpHandler())
@@ -91,7 +95,12 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /ui/expenses/{id}/edit", s.requireSession(s.EditExpenseForm))
 	mux.HandleFunc("POST /ui/expenses/{id}", s.requireSession(s.UpdateExpenseSubmit))
 	mux.HandleFunc("POST /ui/expenses/{id}/delete", s.requireSession(s.DeleteExpenseSubmit))
-	mux.HandleFunc("POST /ui/currency", s.requireSession(s.SetCurrencySubmit))
+	mux.HandleFunc("GET /signup", s.SignupPage)
+	mux.HandleFunc("POST /signup", s.SignupSubmit)
+	mux.HandleFunc("GET /settings", s.requireSession(s.SettingsPage))
+	mux.HandleFunc("POST /settings", s.requireSession(s.SettingsSubmit))
+	mux.HandleFunc("POST /settings/password", s.requireSession(s.PasswordSubmit))
+	mux.HandleFunc("GET /account", s.AccountRedirect)
 	mux.HandleFunc("GET /ui/export", s.requireSession(s.ExportExpenses))
 	mux.HandleFunc("GET /analysis", s.requireSession(s.AnalysisPage))
 	mux.HandleFunc("GET /apps", s.requireSession(s.AppsPage))
@@ -102,7 +111,11 @@ func (s *Server) Routes() http.Handler {
 
 // IsPublicPath reports whether path is exempt from bearer-token auth. Only
 // the JSON API and MCP need a token; the UI checks its session cookie
-// itself, and health, OAuth discovery and the OAuth endpoints are public.
+// itself, and health, OAuth discovery, the OAuth endpoints and sign-up
+// (POST /api/v1/users, the only route on that path) are public.
 func IsPublicPath(path string) bool {
+	if path == "/api/v1/users" {
+		return true
+	}
 	return !strings.HasPrefix(path, "/api/") && path != "/mcp"
 }

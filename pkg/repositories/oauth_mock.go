@@ -119,20 +119,6 @@ func (mr *MockOAuthRepositoryMockRecorder) CreateTokens(ctx any, tokens ...any) 
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateTokens", reflect.TypeOf((*MockOAuthRepository)(nil).CreateTokens), varargs...)
 }
 
-// DeleteClient mocks base method.
-func (m *MockOAuthRepository) DeleteClient(ctx context.Context, id string) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "DeleteClient", ctx, id)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// DeleteClient indicates an expected call of DeleteClient.
-func (mr *MockOAuthRepositoryMockRecorder) DeleteClient(ctx, id any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteClient", reflect.TypeOf((*MockOAuthRepository)(nil).DeleteClient), ctx, id)
-}
-
 // DeleteExpired mocks base method.
 func (m *MockOAuthRepository) DeleteExpired(ctx context.Context, now time.Time) error {
 	m.ctrl.T.Helper()
@@ -178,16 +164,30 @@ func (mr *MockOAuthRepositoryMockRecorder) GetToken(ctx, tokenHash, kind any) *g
 }
 
 // ListConnectedApps mocks base method.
-func (m *MockOAuthRepository) ListConnectedApps(ctx context.Context, now time.Time) ([]models.ConnectedApp, error) {
+func (m *MockOAuthRepository) ListConnectedApps(ctx context.Context, userId string, now time.Time) ([]models.ConnectedApp, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ListConnectedApps", ctx, now)
+	ret := m.ctrl.Call(m, "ListConnectedApps", ctx, userId, now)
 	ret0, _ := ret[0].([]models.ConnectedApp)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // ListConnectedApps indicates an expected call of ListConnectedApps.
-func (mr *MockOAuthRepositoryMockRecorder) ListConnectedApps(ctx, now any) *gomock.Call {
+func (mr *MockOAuthRepositoryMockRecorder) ListConnectedApps(ctx, userId, now any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListConnectedApps", reflect.TypeOf((*MockOAuthRepository)(nil).ListConnectedApps), ctx, now)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListConnectedApps", reflect.TypeOf((*MockOAuthRepository)(nil).ListConnectedApps), ctx, userId, now)
+}
+
+// RevokeClient mocks base method.
+func (m *MockOAuthRepository) RevokeClient(ctx context.Context, userId, clientId string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RevokeClient", ctx, userId, clientId)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// RevokeClient indicates an expected call of RevokeClient.
+func (mr *MockOAuthRepositoryMockRecorder) RevokeClient(ctx, userId, clientId any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RevokeClient", reflect.TypeOf((*MockOAuthRepository)(nil).RevokeClient), ctx, userId, clientId)
 }

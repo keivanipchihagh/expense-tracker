@@ -31,8 +31,10 @@ type ConnectedApp struct {
 // OAuthCode is a one-time authorization code waiting to be exchanged for
 // tokens. Only its hash is stored.
 type OAuthCode struct {
-	CodeHash    string
-	ClientId    string
+	CodeHash string
+	ClientId string
+	// UserId is who signed in; the tokens are issued to them.
+	UserId      string
 	RedirectUri string
 	// CodeChallenge is the PKCE S256 challenge sent with the authorization request.
 	CodeChallenge string
@@ -52,6 +54,7 @@ type OAuthToken struct {
 	TokenHash string
 	Kind      OAuthTokenKind
 	ClientId  string
+	UserId    string
 	ExpiresAt time.Time
 	CreatedAt time.Time
 }

@@ -10,9 +10,9 @@ import (
 	"github.com/kelseyhightower/envconfig"
 )
 
-// minPasswordLength is the shortest AUTH_PASSWORD accepted. The login page
-// is reachable by anyone who can reach the server.
-const minPasswordLength = 16
+// minPasswordLength is the shortest AUTH_PASSWORD accepted, the same as
+// any account password.
+const minPasswordLength = 10
 
 // Config is read from the environment. Each tag is the exact variable name.
 type Config struct {
@@ -35,8 +35,16 @@ type Config struct {
 	// PublicUrl is the base URL clients reach the server at, without a
 	// trailing slash. It appears in OAuth metadata and redirects.
 	PublicUrl string `envconfig:"PUBLIC_URL" default:"http://localhost:8000"`
-	// AuthPassword unlocks the OAuth login page.
-	AuthPassword string `envconfig:"AUTH_PASSWORD" required:"true"`
+	// SignupEnabled lets anyone who reaches the server create an account.
+	// Turn it off once your accounts exist.
+	SignupEnabled bool `envconfig:"SIGNUP_ENABLED" default:"true"`
+
+	// OwnerEmail and AuthPassword are read only to give data
+	// from before accounts existed an owner: on startup, if expenses without
+	// an owner exist, this account is created (or found by email) with
+	// AuthPassword as its password, and gets them. Unused otherwise.
+	OwnerEmail   string `envconfig:"OWNER_EMAIL"`
+	AuthPassword string `envconfig:"AUTH_PASSWORD"`
 }
 
 // NewConfig reads the service configuration from the environment and
@@ -54,9 +62,9 @@ func NewConfig() (Config, error) {
 	}
 
 	if cfg.AuthPassword == "change-me" {
-		return Config{}, errors.New("AUTH_PASSWORD is still the template value; set your own")
+		return Config{}, errors.New("AUTH_PASSWORD is still the template value; set your own or remove it")
 	}
-	if len([]rune(cfg.AuthPassword)) < minPasswordLength {
+	if cfg.AuthPassword != "" && len([]rune(cfg.AuthPassword)) < minPasswordLength {
 		return Config{}, fmt.Errorf("AUTH_PASSWORD must be at least %d characters", minPasswordLength)
 	}
 

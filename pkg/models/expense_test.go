@@ -40,10 +40,12 @@ func TestCurrency_Symbol(t *testing.T) {
 	assert.Equal(t, "$", CurrencyUSD.Symbol())
 	assert.Equal(t, "€", CurrencyEUR.Symbol())
 	assert.Equal(t, "£", CurrencyGBP.Symbol())
-	assert.Equal(t, "CHF", Currency("CHF").Symbol(), "falls back to the code")
+	assert.Equal(t, "XYZ", Currency("XYZ").Symbol(), "falls back to the code")
+
+	assert.Equal(t, "CHF\u00a0", CurrencyCHF.Symbol(), "letter symbols are kept apart from the amount by a no-break space")
 
 	for _, c := range Currencies {
-		assert.NotEqual(t, string(c), c.Symbol(), "every accepted currency has a symbol: %s", c)
+		assert.NotEmpty(t, c.Symbol(), "every accepted currency has a symbol: %s", c)
 	}
 }
 
@@ -51,7 +53,7 @@ func TestIsValid(t *testing.T) {
 	assert.True(t, CurrencyEUR.IsValid())
 	assert.True(t, CurrencyGBP.IsValid())
 	assert.True(t, DefaultCurrency.IsValid())
-	assert.False(t, Currency("CHF").IsValid())
+	assert.False(t, Currency("XYZ").IsValid())
 	assert.False(t, Currency("eur").IsValid())
 	assert.False(t, Currency("").IsValid())
 

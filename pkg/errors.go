@@ -24,6 +24,13 @@ var (
 	InternalError      = &Error{Status: http.StatusInternalServerError, Code: "internal", Message: "internal server error"}
 	ErrExpenseNotFound = &Error{Status: http.StatusNotFound, Code: "not_found", Message: "expense not found"}
 	ErrAppNotFound     = &Error{Status: http.StatusNotFound, Code: "not_found", Message: "app not found"}
+	// ErrNotSignedIn means a request reached a handler without a user; the
+	// auth middleware should have stopped it.
+	ErrNotSignedIn = &Error{Status: http.StatusUnauthorized, Code: "unauthorized", Message: "not signed in"}
+	// ErrSignupDisabled is returned while SIGNUP_ENABLED is false.
+	ErrSignupDisabled = &Error{Status: http.StatusForbidden, Code: "signup_disabled", Message: "sign-up is disabled on this server"}
+	// ErrTooManySignups is returned when the sign-up rate limit is reached.
+	ErrTooManySignups = &Error{Status: http.StatusTooManyRequests, Code: "rate_limited", Message: "too many sign-ups, try again later"}
 )
 
 // OAuthError is an OAuth 2.0 protocol error. The API sends it as

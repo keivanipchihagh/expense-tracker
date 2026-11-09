@@ -32,8 +32,10 @@ func (a LogAction) String() string {
 // Log records one change to an expense as JSON snapshots of the row.
 // Before is nil for a create and After is nil for a delete.
 type Log struct {
-	Id        int64           `json:"id"`
-	ExpenseId string          `json:"expense_id"`
+	Id        int64  `json:"id"`
+	ExpenseId string `json:"expense_id"`
+	// UserId is the expense's owner, kept after the expense is deleted.
+	UserId    string          `json:"user_id"`
 	Action    LogAction       `json:"action"`
 	Before    json.RawMessage `json:"before"`
 	After     json.RawMessage `json:"after"`
@@ -43,9 +45,9 @@ type Log struct {
 // NewLog builds a Log for a change to expenseId. It panics when the
 // snapshots don't match the action: create has only After, delete has only
 // Before, update has both.
-func NewLog(expenseId string, action LogAction, before, after json.RawMessage) *Log {
-	if expenseId == "" {
-		panic("log expense id must not be empty")
+func NewLog(expenseId, userId string, action LogAction, before, after json.RawMessage) *Log {
+	if expenseId == "" || userId == "" {
+		panic("log expense id and user id must not be empty")
 	}
 	switch action {
 	case LogActionCreate:
@@ -66,6 +68,7 @@ func NewLog(expenseId string, action LogAction, before, after json.RawMessage) *
 
 	return &Log{
 		ExpenseId: expenseId,
+		UserId:    userId,
 		Action:    action,
 		Before:    before,
 		After:     after,

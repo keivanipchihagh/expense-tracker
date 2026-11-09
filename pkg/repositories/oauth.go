@@ -21,12 +21,14 @@ type OAuthRepository interface {
 	CreateClient(ctx context.Context, client models.OAuthClient) error
 	// GetClient returns the client with the given id, or ErrOAuthNotFound.
 	GetClient(ctx context.Context, id string) (models.OAuthClient, error)
-	// ListConnectedApps returns clients holding a token that is valid at
-	// now, most recently active first.
-	ListConnectedApps(ctx context.Context, now time.Time) ([]models.ConnectedApp, error)
-	// DeleteClient removes the client with all its codes and tokens, so it
-	// loses access at once. Returns ErrOAuthNotFound if missing.
-	DeleteClient(ctx context.Context, id string) error
+	// ListConnectedApps returns the clients holding a token of the user's
+	// that is valid at now, most recently active first.
+	ListConnectedApps(ctx context.Context, userId string, now time.Time) ([]models.ConnectedApp, error)
+	// RevokeClient removes the user's codes and tokens for the client, so it
+	// loses access to their account at once, and removes the client itself
+	// once no one holds anything for it. Returns ErrOAuthNotFound when the
+	// user had nothing for that client.
+	RevokeClient(ctx context.Context, userId, clientId string) error
 
 	CreateCode(ctx context.Context, code models.OAuthCode) error
 	// ConsumeCode deletes and returns the code in one statement, so a code
@@ -67,6 +69,7 @@ var oauthSchema = []string{
 	`CREATE TABLE IF NOT EXISTS oauth_codes (
 		code_hash      TEXT    PRIMARY KEY,
 		client_id      TEXT    NOT NULL,
+		user_id        TEXT,
 		redirect_uri   TEXT    NOT NULL,
 		code_challenge TEXT    NOT NULL,
 		expires_at     INTEGER NOT NULL
@@ -75,6 +78,7 @@ var oauthSchema = []string{
 		token_hash TEXT    PRIMARY KEY,
 		kind       TEXT    NOT NULL CHECK (kind IN ('access', 'refresh')),
 		client_id  TEXT    NOT NULL,
+		user_id    TEXT,
 		expires_at INTEGER NOT NULL,
 		created_at INTEGER NOT NULL
 	)`,
@@ -88,6 +92,13 @@ func NewOAuthRepository(ctx context.Context, client *sqlite.Client) (OAuthReposi
 	for _, stmt := range oauthSchema {
 		if _, err := client.ExecContext(ctx, stmt); err != nil {
 			return nil, fmt.Errorf("create oauth tables: %w", err)
+		}
+	}
+	// Codes and tokens from before accounts belong to nobody: apps sign in
+	// again. Clients themselves aren't tied to a user.
+	for _, table := range []string{"oauth_codes", "oauth_tokens"} {
+		if err := addUserIdColumn(ctx, client, table, true); err != nil {
+			return nil, err
 		}
 	}
 	return &OAuthRepositoryImpl{client: client}, nil
@@ -136,14 +147,14 @@ func (r *OAuthRepositoryImpl) GetClient(ctx context.Context, id string) (models.
 	return c, nil
 }
 
-func (r *OAuthRepositoryImpl) ListConnectedApps(ctx context.Context, now time.Time) ([]models.ConnectedApp, error) {
+func (r *OAuthRepositoryImpl) ListConnectedApps(ctx context.Context, userId string, now time.Time) ([]models.ConnectedApp, error) {
 	rows, err := r.client.QueryContext(ctx, `
 		SELECT c.id, c.name, c.redirect_uris, c.auth_method, c.created_at, MAX(t.created_at)
 		FROM oauth_clients c
 		JOIN oauth_tokens t ON t.client_id = c.id
-		WHERE t.expires_at > ?
+		WHERE t.user_id = ? AND t.expires_at > ?
 		GROUP BY c.id
-		ORDER BY MAX(t.created_at) DESC, c.id`, now.Unix())
+		ORDER BY MAX(t.created_at) DESC, c.id`, userId, now.Unix())
 	if err != nil {
 		return nil, fmt.Errorf("list connected apps: %w", err)
 	}
@@ -172,19 +183,27 @@ func (r *OAuthRepositoryImpl) ListConnectedApps(ctx context.Context, now time.Ti
 	return apps, nil
 }
 
-func (r *OAuthRepositoryImpl) DeleteClient(ctx context.Context, id string) error {
+func (r *OAuthRepositoryImpl) RevokeClient(ctx context.Context, userId, clientId string) error {
 	return r.client.WithTx(ctx, func(tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, "DELETE FROM oauth_clients WHERE id = ?", id)
-		if err != nil {
-			return fmt.Errorf("delete oauth client: %w", err)
+		var removed int64
+		for _, table := range []string{"oauth_codes", "oauth_tokens"} {
+			res, err := tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE client_id = ? AND user_id = ?", clientId, userId)
+			if err != nil {
+				return fmt.Errorf("revoke client rows from %s: %w", table, err)
+			}
+			n, _ := res.RowsAffected()
+			removed += n
 		}
-		if n, _ := res.RowsAffected(); n == 0 {
+		if removed == 0 {
 			return ErrOAuthNotFound
 		}
-		for _, table := range []string{"oauth_codes", "oauth_tokens"} {
-			if _, err := tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE client_id = ?", id); err != nil {
-				return fmt.Errorf("delete client rows from %s: %w", table, err)
-			}
+		_, err := tx.ExecContext(ctx, `
+			DELETE FROM oauth_clients
+			WHERE id = ?
+			  AND id NOT IN (SELECT client_id FROM oauth_tokens)
+			  AND id NOT IN (SELECT client_id FROM oauth_codes)`, clientId)
+		if err != nil {
+			return fmt.Errorf("delete revoked client: %w", err)
 		}
 		return nil
 	})
@@ -192,9 +211,9 @@ func (r *OAuthRepositoryImpl) DeleteClient(ctx context.Context, id string) error
 
 func (r *OAuthRepositoryImpl) CreateCode(ctx context.Context, c models.OAuthCode) error {
 	_, err := r.client.ExecContext(ctx,
-		`INSERT INTO oauth_codes (code_hash, client_id, redirect_uri, code_challenge, expires_at)
-		 VALUES (?, ?, ?, ?, ?)`,
-		c.CodeHash, c.ClientId, c.RedirectUri, c.CodeChallenge, c.ExpiresAt.Unix(),
+		`INSERT INTO oauth_codes (code_hash, client_id, user_id, redirect_uri, code_challenge, expires_at)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		c.CodeHash, c.ClientId, c.UserId, c.RedirectUri, c.CodeChallenge, c.ExpiresAt.Unix(),
 	)
 	if err != nil {
 		return fmt.Errorf("insert oauth code: %w", err)
@@ -209,8 +228,8 @@ func (r *OAuthRepositoryImpl) ConsumeCode(ctx context.Context, codeHash string) 
 	)
 	err := r.client.QueryRowContext(ctx,
 		`DELETE FROM oauth_codes WHERE code_hash = ?
-		 RETURNING code_hash, client_id, redirect_uri, code_challenge, expires_at`, codeHash,
-	).Scan(&c.CodeHash, &c.ClientId, &c.RedirectUri, &c.CodeChallenge, &expiresAt)
+		 RETURNING code_hash, client_id, user_id, redirect_uri, code_challenge, expires_at`, codeHash,
+	).Scan(&c.CodeHash, &c.ClientId, &c.UserId, &c.RedirectUri, &c.CodeChallenge, &expiresAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return models.OAuthCode{}, ErrOAuthNotFound
 	}
@@ -225,8 +244,8 @@ func (r *OAuthRepositoryImpl) CreateTokens(ctx context.Context, tokens ...models
 	return r.client.WithTx(ctx, func(tx *sql.Tx) error {
 		for _, t := range tokens {
 			_, err := tx.ExecContext(ctx,
-				`INSERT INTO oauth_tokens (token_hash, kind, client_id, expires_at, created_at) VALUES (?, ?, ?, ?, ?)`,
-				t.TokenHash, string(t.Kind), t.ClientId, t.ExpiresAt.Unix(), t.CreatedAt.Unix(),
+				`INSERT INTO oauth_tokens (token_hash, kind, client_id, user_id, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+				t.TokenHash, string(t.Kind), t.ClientId, t.UserId, t.ExpiresAt.Unix(), t.CreatedAt.Unix(),
 			)
 			if err != nil {
 				return fmt.Errorf("insert oauth token: %w", err)
@@ -238,14 +257,14 @@ func (r *OAuthRepositoryImpl) CreateTokens(ctx context.Context, tokens ...models
 
 func (r *OAuthRepositoryImpl) GetToken(ctx context.Context, tokenHash string, kind models.OAuthTokenKind) (models.OAuthToken, error) {
 	return scanToken(r.client.QueryRowContext(ctx,
-		`SELECT token_hash, kind, client_id, expires_at, created_at FROM oauth_tokens
+		`SELECT token_hash, kind, client_id, user_id, expires_at, created_at FROM oauth_tokens
 		 WHERE token_hash = ? AND kind = ?`, tokenHash, string(kind)))
 }
 
 func (r *OAuthRepositoryImpl) ConsumeToken(ctx context.Context, tokenHash string, kind models.OAuthTokenKind) (models.OAuthToken, error) {
 	return scanToken(r.client.QueryRowContext(ctx,
 		`DELETE FROM oauth_tokens WHERE token_hash = ? AND kind = ?
-		 RETURNING token_hash, kind, client_id, expires_at, created_at`, tokenHash, string(kind)))
+		 RETURNING token_hash, kind, client_id, user_id, expires_at, created_at`, tokenHash, string(kind)))
 }
 
 func (r *OAuthRepositoryImpl) DeleteExpired(ctx context.Context, now time.Time) error {
@@ -273,7 +292,7 @@ func scanToken(row *sql.Row) (models.OAuthToken, error) {
 		kind                 string
 		expiresAt, createdAt int64
 	)
-	err := row.Scan(&t.TokenHash, &kind, &t.ClientId, &expiresAt, &createdAt)
+	err := row.Scan(&t.TokenHash, &kind, &t.ClientId, &t.UserId, &expiresAt, &createdAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return models.OAuthToken{}, ErrOAuthNotFound
 	}
