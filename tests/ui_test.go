@@ -100,6 +100,28 @@ func TestUI_Login(t *testing.T) {
 	assert.Equal(t, "/", header.Get("Location"))
 }
 
+func TestUI_Layout(t *testing.T) {
+	s := newTestServer(t)
+	c := browser(t)
+	toggle := `role="switch" aria-checked="false" aria-label="Dark theme" title="Dark theme" data-theme-toggle`
+
+	status, _, page := send(t, c, http.MethodGet, s.url+"/login", nil, nil)
+	require.Equal(t, http.StatusOK, status)
+	assert.Contains(t, page, `<script src="/static/theme.js"></script>`, "loaded without defer so the theme is set before paint")
+	assert.Contains(t, page, toggle, "signed-out pages have the switch")
+	assert.Contains(t, page, `<a href="https://github.com/keivanipchihagh/expense-tracker" rel="noopener noreferrer">GitHub</a>`, "the footer links to the repository")
+
+	status, header, script := send(t, c, http.MethodGet, s.url+"/static/theme.js", nil, nil)
+	assert.Equal(t, http.StatusOK, status)
+	assert.Contains(t, header.Get("Content-Type"), "javascript")
+	assert.Contains(t, script, "data-theme-toggle")
+
+	signIn(t, s, c)
+	status, _, page = send(t, c, http.MethodGet, s.url+"/", nil, nil)
+	require.Equal(t, http.StatusOK, status)
+	assert.Contains(t, page, toggle, "signed-in pages have the switch")
+}
+
 func TestUI_ExpenseLifecycle(t *testing.T) {
 	s := newTestServer(t)
 	c := browser(t)

@@ -7,6 +7,7 @@
   <meta name="htmx-config" content='{"includeIndicatorStyles":false,"allowEval":false,"allowScriptTags":false}'>
   <title>{{.Title}} · expense-tracker</title>
   <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/theme.js"></script>
   <script src="/static/htmx.min.js" defer></script>
   <script src="/static/app.js" defer></script>
 </head>
@@ -19,15 +20,28 @@
     <nav class="nav">
       <a href="/" class="{{if eq .Nav "expenses"}}active{{end}}">Expenses</a>
       <a href="/apps" class="{{if eq .Nav "apps"}}active{{end}}">Apps</a>
+      {{template "theme-toggle"}}
       <form method="post" action="/logout">
         <button type="submit" class="ghost small">Sign out</button>
       </form>
     </nav>
   </header>
+  {{else}}
+  <header class="topbar end">{{template "theme-toggle"}}</header>
   {{end}}
   <main>
     {{template "content" .}}
   </main>
+  <footer class="footer muted">
+    expense-tracker · <a href="https://github.com/keivanipchihagh/expense-tracker" rel="noopener noreferrer">GitHub</a>
+  </footer>
 </body>
 </html>
 {{end}}
+
+{{define "theme-toggle"}}<button type="button" class="theme-toggle" role="switch" aria-checked="false" aria-label="Dark theme" title="Dark theme" data-theme-toggle>
+  <span class="theme-knob" aria-hidden="true">
+    <svg class="icon-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+    <svg class="icon-moon" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+  </span>
+</button>{{end}}

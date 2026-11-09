@@ -32,6 +32,7 @@ Open `PUBLIC_URL` (by default http://localhost:8000) and sign in with `AUTH_PASS
 - Totals per currency, with a breakdown by category
 - Add, edit and delete expenses; time and time zone default to your browser's
 - **Apps** page: see which apps (Claude, ChatGPT, …) are signed in through OAuth and revoke their access
+- Light/dark switch in the top bar; follows your system theme until you pick one (remembered in the browser)
 
 The UI is server-rendered (Go templates and [HTMX](https://htmx.org), bundled in the binary). Signing in sets an `HttpOnly`, `SameSite=Strict` session cookie valid for 30 days (named with the `__Host-` prefix when `PUBLIC_URL` is HTTPS). The cookie only opens the UI; the JSON API always needs a bearer token.
 

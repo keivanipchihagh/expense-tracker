@@ -1,36 +1,24 @@
 :root {
-  --bg: #fafafa;
-  --surface: #ffffff;
-  --subtle: #f4f4f5;
-  --text: #09090b;
-  --muted: #71717a;
-  --border: #e4e4e7;
-  --accent: #18181b;
-  --accent-text: #fafafa;
-  --danger: #dc2626;
-  --bar: #18181b;
-  --backdrop: rgb(9 9 11 / 0.35);
-  --shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 8px 24px rgb(0 0 0 / 0.06);
+  /* Each color is light-dark(light, dark). color-scheme picks the side: the
+     system preference by default, or the switch's choice via data-theme. */
+  color-scheme: light dark;
+  --bg: light-dark(#fafafa, #09090b);
+  --surface: light-dark(#ffffff, #111113);
+  --subtle: light-dark(#f4f4f5, #1c1c1f);
+  --text: light-dark(#09090b, #fafafa);
+  --muted: light-dark(#71717a, #a1a1aa);
+  --border: light-dark(#e4e4e7, #27272a);
+  --accent: light-dark(#18181b, #fafafa);
+  --accent-text: light-dark(#fafafa, #09090b);
+  --danger: light-dark(#dc2626, #f87171);
+  --bar: light-dark(#18181b, #e4e4e7);
+  --backdrop: light-dark(rgb(9 9 11 / 0.35), rgb(0 0 0 / 0.6));
+  --shadow: 0 1px 2px light-dark(rgb(0 0 0 / 0.04), rgb(0 0 0 / 0.3)), 0 8px 24px light-dark(rgb(0 0 0 / 0.06), rgb(0 0 0 / 0.4));
   --radius: 14px;
   --radius-sm: 10px;
 }
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #09090b;
-    --surface: #111113;
-    --subtle: #1c1c1f;
-    --text: #fafafa;
-    --muted: #a1a1aa;
-    --border: #27272a;
-    --accent: #fafafa;
-    --accent-text: #09090b;
-    --danger: #f87171;
-    --bar: #e4e4e7;
-    --backdrop: rgb(0 0 0 / 0.6);
-    --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px rgb(0 0 0 / 0.4);
-  }
-}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
 
 *, *::before, *::after { box-sizing: border-box; }
 
@@ -46,7 +34,13 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-main { max-width: 720px; margin: 0 auto; padding: 24px 16px 64px; }
+main { width: 100%; max-width: 720px; margin: 0 auto; padding: 24px 16px 40px; flex: 1; }
+
+/* The footer sits at the bottom of short pages and after the content on long ones. */
+body { display: flex; flex-direction: column; min-height: 100dvh; }
+.footer { padding: 16px 16px 24px; text-align: center; font-size: .8rem; }
+.footer a { color: inherit; text-underline-offset: 3px; }
+.footer a:hover { color: var(--text); }
 
 h1, h2, p { margin: 0; }
 h1 { font-size: 1.75rem; font-weight: 650; letter-spacing: -0.025em; }
@@ -67,6 +61,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   display: flex;
   justify-content: space-between;
   align-items: center;
+  width: 100%;
   max-width: 720px;
   margin: 0 auto;
   padding: 12px 16px;
@@ -109,6 +104,40 @@ button.block { width: 100%; }
 button.icon { width: 34px; height: 34px; padding: 0; border-color: transparent; background: transparent; color: var(--muted); }
 button.icon:hover { background: var(--subtle); color: var(--text); }
 button.icon.danger:hover { color: var(--danger); }
+
+/* Theme switch: a pill with a knob that slides right for dark. The knob shows
+   the current theme's icon. Hidden without JavaScript (no data-theme). */
+button.theme-toggle {
+  position: relative;
+  width: 52px;
+  height: 30px;
+  padding: 0;
+  margin-right: 4px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--subtle);
+  justify-content: flex-start;
+}
+.theme-knob {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-left: 2px;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.15);
+  transition: transform .2s ease;
+}
+.theme-knob svg { width: 14px; height: 14px; }
+button.theme-toggle[aria-checked="true"] .theme-knob { transform: translateX(22px); }
+:root:not([data-theme]) .theme-toggle { display: none; }
+:root[data-theme="light"] .theme-toggle .icon-moon,
+:root[data-theme="dark"] .theme-toggle .icon-sun { display: none; }
+@media (prefers-reduced-motion: reduce) { .theme-knob { transition: none; } }
+.topbar.end { justify-content: flex-end; }
 button.danger-outline { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); background: transparent; }
 button.danger-outline:hover { background: color-mix(in srgb, var(--danger) 10%, transparent); }
 .apps .row { grid-template-columns: auto 1fr auto; }
@@ -310,10 +339,11 @@ a.button {
 a.button.primary { background: var(--accent); color: var(--accent-text); }
 a.button.primary:hover { opacity: .88; }
 
+main:has(.error-page) { display: flex; flex-direction: column; }
 .error-page {
   display: flex;
   flex-direction: column;
-  min-height: calc(100vh - 88px);
+  flex: 1;
 }
 .error-body {
   flex: 1;
