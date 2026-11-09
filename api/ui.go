@@ -146,9 +146,10 @@ func (s *Server) IndexPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.renderSignedIn(w, r, http.StatusOK, "index.html", pageData{
-		Title:   "Expenses",
-		Nav:     "expenses",
-		Results: results,
+		Title:     "Expenses",
+		Nav:       "expenses",
+		Results:   results,
+		Assistant: s.handler.ScanEnabled(),
 	})
 }
 
@@ -306,7 +307,10 @@ func (s *Server) renderForm(w http.ResponseWriter, r *http.Request, status int, 
 		return
 	}
 	data.Categories = toStrings(categories)
-	if data.Id == "" && !models.HasCategory(categories, models.Category(data.Values.Category)) {
+	if data.FromDraft && !models.HasCategory(categories, models.Category(data.Values.Category)) {
+		// Left for the user to choose.
+		data.Values.Category = ""
+	} else if data.Id == "" && !models.HasCategory(categories, models.Category(data.Values.Category)) {
 		data.Values.Category = ""
 		if models.HasCategory(categories, models.CategoryFood) {
 			data.Values.Category = string(models.CategoryFood)
@@ -546,6 +550,8 @@ type pageData struct {
 	Errors map[string]string
 	// Notice is a success message, e.g. "Saved."
 	Notice string
+	// Assistant shows the floating composer (type, say or snap an expense).
+	Assistant bool
 	// Section is the part of the page a form was sent from; its messages
 	// are shown there and it gets the focus (so the browser scrolls to it).
 	Section string
@@ -863,6 +869,11 @@ type formData struct {
 	ScanWarnings []string
 	// HasReceipt shows the kept receipt when editing, with a way to remove it.
 	HasReceipt bool
+	// FromDraft means the values were read by the model (from a receipt or
+	// text): fields it wasn't sure of stay empty, the category included.
+	// FromText is the message they were read from.
+	FromDraft bool
+	FromText  string
 	// Categories are the user's, for the select box (see renderForm).
 	Categories []string
 }

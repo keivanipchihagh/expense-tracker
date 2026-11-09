@@ -4,6 +4,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/keivanipchihagh/expense-tracker/internal/handler"
@@ -12,7 +14,10 @@ import (
 	"github.com/keivanipchihagh/expense-tracker/pkg/models"
 )
 
-const scanPath = "/ui/expenses/scan"
+const (
+	scanPath = "/ui/expenses/scan"
+	textPath = "/ui/expenses/text"
+)
 
 // RouteLimits are the routes that need more than the server-wide limits:
 // a receipt scan uploads a photo and waits on a free model that can be
@@ -21,6 +26,7 @@ func RouteLimits() []pkgHttp.RouteLimits {
 	upload := int64(handler.MaxReceiptBytes + 64<<10)
 	return []pkgHttp.RouteLimits{
 		{Path: scanPath, Timeout: 90 * time.Second, MaxBodyBytes: upload},
+		{Path: textPath, Timeout: 90 * time.Second},
 		// Adding an expense can carry the scanned receipt along.
 		{Path: "/ui/expenses", MaxBodyBytes: upload},
 	}
@@ -66,7 +72,7 @@ func (s *Server) ScanReceiptSubmit(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	draft, err := s.handler.ScanReceipt(r.Context(), image)
+	draft, err := s.handler.ScanReceipt(r.Context(), image, zoneFromOffset(data.Values.TzOffset))
 	if err != nil {
 		appErr, ok := errors.AsType[*pkg.Error](err)
 		switch {
@@ -86,6 +92,59 @@ func (s *Server) ScanReceiptSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data.Scanned = true
+	fillFromDraft(&data, draft, "12:00")
+	render(http.StatusOK)
+}
+
+// TextSubmit handles POST /ui/expenses/text: "text" (typed or dictated,
+// e.g. "12.50 lunch at Rewe yesterday") plus the list's hidden fields. It
+// answers with the new expense form, filled with only what the text says,
+// for the user to finish and add. Nothing is saved here.
+func (s *Server) TextSubmit(w http.ResponseWriter, r *http.Request) {
+	if !s.handler.ScanEnabled() {
+		http.NotFound(w, r)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad form", http.StatusBadRequest)
+		return
+	}
+	text := strings.TrimSpace(r.PostForm.Get("text"))
+	data := formData{
+		Range:       filterFromExpenseForm(r.PostForm, time.Now()),
+		Values:      formValues{TzOffset: r.PostForm.Get("tz_offset")},
+		Symbol:      s.currencySymbol(r),
+		ScanEnabled: true,
+		FromText:    text,
+	}
+	loc := zoneFromOffset(data.Values.TzOffset)
+	draft, err := s.handler.ReadText(r.Context(), text, loc)
+	if err != nil {
+		appErr, ok := errors.AsType[*pkg.Error](err)
+		switch {
+		case !ok:
+			data.ScanError = "Something went wrong. Try again."
+			s.renderForm(w, r, http.StatusInternalServerError, data)
+		case appErr.Fields["text"] != "":
+			data.ScanError = "The message " + appErr.Fields["text"] + "."
+			s.renderForm(w, r, appErr.Status, data)
+		case appErr.Status == http.StatusUnauthorized:
+			s.renderUiError(w, r, err)
+		default:
+			data.ScanError = appErr.Message
+			s.renderForm(w, r, appErr.Status, data)
+		}
+		return
+	}
+	// A day without a time ("yesterday") keeps the time it is now.
+	fillFromDraft(&data, draft, time.Now().In(loc).Format("15:04"))
+	s.renderForm(w, r, http.StatusOK, data)
+}
+
+// fillFromDraft puts what was read into the form. defaultTime is used when
+// the draft has a day but no time.
+func fillFromDraft(data *formData, draft handler.ReceiptDraft, defaultTime string) {
+	data.FromDraft = true
 	data.ScanWarnings = draft.Warnings
 	data.Values.Amount = draft.Amount
 	data.Values.Category = string(draft.Category)
@@ -94,11 +153,20 @@ func (s *Server) ScanReceiptSubmit(w http.ResponseWriter, r *http.Request) {
 	if draft.Date != "" {
 		t := draft.Time
 		if t == "" {
-			t = "12:00"
+			t = defaultTime
 		}
 		data.Values.OccurredLocal = draft.Date + "T" + t + ":00"
 	}
-	render(http.StatusOK)
+}
+
+// zoneFromOffset turns the browser's UTC offset in minutes (east of UTC)
+// into a time zone; anything unreadable is UTC.
+func zoneFromOffset(minutes string) *time.Location {
+	m, err := strconv.Atoi(minutes)
+	if err != nil || m < -14*60 || m > 14*60 {
+		return time.UTC
+	}
+	return time.FixedZone("", m*60)
 }
 
 // ReceiptImage handles GET /ui/expenses/{id}/receipt: the photo kept with

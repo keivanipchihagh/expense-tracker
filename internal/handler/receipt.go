@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -26,6 +27,8 @@ const (
 	scanWindow = time.Hour
 	// maxReceiptNote is the longest note taken from a receipt.
 	maxReceiptNote = 200
+	// MaxExpenseText is the longest message ReadText takes.
+	MaxExpenseText = 500
 )
 
 var (
@@ -60,17 +63,53 @@ func (h *Handler) SetReceiptScanner(s receipt.Scanner) { h.scanner = s }
 func (h *Handler) ScanEnabled() bool { return h.scanner != nil }
 
 // ScanReceipt reads an expense off a receipt image for the signed-in user.
-// The result is only a draft for the user to check: every field the model
-// returns is validated here, and anything doubtful is dropped or flagged.
-func (h *Handler) ScanReceipt(ctx context.Context, image []byte) (ReceiptDraft, error) {
-	uid, err := userId(ctx)
-	if err != nil {
-		return ReceiptDraft{}, err
-	}
+// loc is the user's time zone, for "today". The result is only a draft for
+// the user to check: every field the model returns is validated here, and
+// anything doubtful is dropped or flagged.
+func (h *Handler) ScanReceipt(ctx context.Context, image []byte, loc *time.Location) (ReceiptDraft, error) {
 	if h.scanner == nil {
 		return ReceiptDraft{}, ErrScanDisabled
 	}
 	mimeType, err := CheckReceiptImage(image)
+	if err != nil {
+		return ReceiptDraft{}, err
+	}
+	return h.readExpense(ctx, sourceReceipt, loc, func(today time.Time, categories []string) (receipt.Reading, error) {
+		return h.scanner.Scan(ctx, image, mimeType, today, categories)
+	})
+}
+
+// ReadText reads an expense out of what the signed-in user typed or said,
+// e.g. "12.50 lunch at Rewe yesterday". Only what the text says is filled
+// in; loc is the user's time zone, for "yesterday".
+func (h *Handler) ReadText(ctx context.Context, text string, loc *time.Location) (ReceiptDraft, error) {
+	if h.scanner == nil {
+		return ReceiptDraft{}, ErrScanDisabled
+	}
+	text = strings.Join(strings.Fields(text), " ")
+	switch {
+	case text == "":
+		return ReceiptDraft{}, pkg.NewValidationError(map[string]string{"text": "is required"})
+	case utf8.RuneCountInString(text) > MaxExpenseText:
+		return ReceiptDraft{}, pkg.NewValidationError(map[string]string{"text": fmt.Sprintf("must be at most %d characters", MaxExpenseText)})
+	}
+	return h.readExpense(ctx, sourceText, loc, func(today time.Time, categories []string) (receipt.Reading, error) {
+		return h.scanner.ReadText(ctx, text, today, categories)
+	})
+}
+
+// draftSource is where a draft was read from; it changes the warnings.
+type draftSource int
+
+const (
+	sourceReceipt draftSource = iota
+	sourceText
+)
+
+// readExpense rate limits, asks the model through ask, and checks the
+// answer.
+func (h *Handler) readExpense(ctx context.Context, source draftSource, loc *time.Location, ask func(today time.Time, categories []string) (receipt.Reading, error)) (ReceiptDraft, error) {
+	uid, err := userId(ctx)
 	if err != nil {
 		return ReceiptDraft{}, err
 	}
@@ -79,6 +118,10 @@ func (h *Handler) ScanReceipt(ctx context.Context, image []byte) (ReceiptDraft, 
 		return ReceiptDraft{}, ErrTooManyScans
 	}
 	h.scans.record(uid, now)
+	if loc == nil {
+		loc = time.UTC
+	}
+	today := now.In(loc)
 
 	currency, err := h.DisplayCurrency(ctx)
 	if err != nil {
@@ -89,24 +132,27 @@ func (h *Handler) ScanReceipt(ctx context.Context, image []byte) (ReceiptDraft, 
 		return ReceiptDraft{}, err
 	}
 	started := time.Now()
-	reading, err := h.scanner.Scan(ctx, image, mimeType, now, toStrings(categories))
+	reading, err := ask(today, toStrings(categories))
 	if err != nil {
 		if scanErr, ok := errors.AsType[*receipt.Error](err); ok {
-			h.logger.WarnContext(ctx, "receipt scan failed", "user_id", uid, "error", err)
+			h.logger.WarnContext(ctx, "reading an expense failed", "user_id", uid, "error", err)
 			status := http.StatusBadGateway
 			if scanErr.Retry {
 				status = http.StatusServiceUnavailable
 			}
 			return ReceiptDraft{}, &pkg.Error{Status: status, Code: "scan_failed", Message: scanErr.Message}
 		}
-		h.logger.ErrorContext(ctx, "receipt scan failed", "user_id", uid, "error", err)
+		h.logger.ErrorContext(ctx, "reading an expense failed", "user_id", uid, "error", err)
 		return ReceiptDraft{}, pkg.InternalError
 	}
-	h.logger.InfoContext(ctx, "receipt scanned", "user_id", uid, "duration_ms", time.Since(started).Milliseconds(), "is_receipt", reading.IsReceipt)
-	if !reading.IsReceipt {
+	h.logger.InfoContext(ctx, "expense read", "user_id", uid, "from_text", source == sourceText, "duration_ms", time.Since(started).Milliseconds(), "is_expense", reading.IsExpense)
+	if !reading.IsExpense {
+		if source == sourceText {
+			return ReceiptDraft{}, &pkg.Error{Status: http.StatusUnprocessableEntity, Code: "no_expense", Message: "Couldn't find an expense in that. Try something like \"12.50 lunch at Rewe\"."}
+		}
 		return ReceiptDraft{}, &pkg.Error{Status: http.StatusUnprocessableEntity, Code: "not_a_receipt", Message: "That doesn't look like a receipt. Try a clearer photo of the whole receipt."}
 	}
-	return draftFrom(reading, now, currency, categories), nil
+	return draftFrom(reading, today, currency, categories, source), nil
 }
 
 // CheckReceiptImage returns the image's type, sniffed from its bytes (not
@@ -192,18 +238,17 @@ func (h *Handler) ReceiptIds(ctx context.Context) (map[string]bool, error) {
 	return ids, nil
 }
 
-// draftFrom validates what the model read.
-// categories are the user's; the draft's category is one of them: what the
-// model picked, else "other" if they have it, else none.
-func draftFrom(r receipt.Reading, now time.Time, display models.Currency, categories []models.Category) ReceiptDraft {
+// draftFrom validates what the model read. categories are the user's; the
+// draft's category is one of them, or empty when the model didn't pick one
+// for sure, so the user chooses it.
+func draftFrom(r receipt.Reading, now time.Time, display models.Currency, categories []models.Category, source draftSource) ReceiptDraft {
 	d := ReceiptDraft{}
-	if models.HasCategory(categories, models.CategoryOther) {
-		d.Category = models.CategoryOther
-	}
 	warn := func(s string) { d.Warnings = append(d.Warnings, s) }
 
 	if amount, ok := parseReceiptAmount(r.Amount); ok {
 		d.Amount = amount
+	} else if source == sourceText {
+		warn("No amount in what you said. Enter it yourself.")
 	} else {
 		warn("Couldn't read the total. Enter the amount yourself.")
 	}
@@ -211,21 +256,28 @@ func draftFrom(r receipt.Reading, now time.Time, display models.Currency, catego
 	if c := strings.ToUpper(strings.TrimSpace(r.Currency)); len(c) == 3 && isLetters(c) {
 		d.Currency = c
 		if c != string(display) {
-			warn("The receipt is in " + c + ", but amounts are shown in " + string(display) + " and aren't converted. Check the amount.")
+			if source == sourceText {
+				warn("You mentioned " + c + ", but amounts are shown in " + string(display) + " and aren't converted. Check the amount.")
+			} else {
+				warn("The receipt is in " + c + ", but amounts are shown in " + string(display) + " and aren't converted. Check the amount.")
+			}
 		}
 	}
 
-	if date, err := time.Parse(time.DateOnly, r.Date); err == nil {
-		// A receipt from the future, or from long ago, is a misreading.
-		if date.After(now.AddDate(0, 0, 1)) || date.Before(now.AddDate(-5, 0, 0)) {
-			warn("The date on the receipt (" + r.Date + ") looks wrong, so it wasn't used.")
+	if r.Date != "" {
+		if date, err := time.Parse(time.DateOnly, r.Date); err != nil {
+			warn("Couldn't read the date. It's set to now.")
+		} else if date.After(now.AddDate(0, 0, 1)) || date.Before(now.AddDate(-5, 0, 0)) {
+			// From the future, or from long ago: a misreading.
+			warn("The date (" + r.Date + ") looks wrong, so it wasn't used.")
 		} else {
 			d.Date = r.Date
 			if t, err := time.Parse("15:04", r.Time); err == nil {
 				d.Time = t.Format("15:04")
 			}
 		}
-	} else {
+	} else if source == sourceReceipt {
+		// A message without a day means now; a receipt always has one.
 		warn("Couldn't read the date. It's set to now.")
 	}
 

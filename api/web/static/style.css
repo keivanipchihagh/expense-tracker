@@ -618,3 +618,69 @@ main:has(.error-page) { display: flex; flex-direction: column; }
 .error-body > p.muted { max-width: 380px; }
 .error-actions { margin-top: 28px; }
 .error-foot { text-align: center; font-size: .8rem; }
+
+/* Composer: a floating bar at the bottom of the expense list to type, say
+   or photograph an expense. The right button is a microphone while the
+   field is empty and a send button once there's text. */
+.composer {
+  position: fixed;
+  left: 50%;
+  bottom: calc(20px + env(safe-area-inset-bottom));
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: min(560px, calc(100% - 24px));
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--surface) 86%, transparent);
+  backdrop-filter: blur(14px) saturate(1.3);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+  box-shadow: var(--shadow), 0 12px 32px rgba(0, 0, 0, .16);
+  transform: translateX(-50%);
+  transition: border-color .15s;
+}
+.composer:focus-within { border-color: var(--text); }
+/* Room below the list so the bar never covers the last row. */
+body:has(.composer) .footer { padding-bottom: calc(100px + env(safe-area-inset-bottom)); }
+
+.composer-input {
+  flex: 1;
+  min-width: 0;
+  height: 40px;
+  padding: 0 6px;
+  border: 0;
+  background: transparent;
+  font-size: 16px; /* 16px keeps iOS from zooming in */
+}
+.composer-input:focus { border: 0; box-shadow: none; outline: none; }
+
+.composer button { flex: none; width: 40px; height: 40px; padding: 0; border-radius: 12px; }
+.composer button svg { width: 20px; height: 20px; }
+.composer-icon { border-color: transparent; background: transparent; color: var(--muted); }
+.composer-icon:hover { background: var(--subtle); color: var(--text); }
+
+.composer-action { border-color: transparent; background: var(--subtle); color: var(--text); transition: background .15s, color .15s; }
+.composer-action .icon-send, .composer-action .composer-spinner { display: none; }
+.composer[data-state="send"] .composer-action { background: var(--accent); color: var(--accent-text); }
+.composer[data-state="send"] .icon-mic, .composer[data-state="busy"] .icon-mic { display: none; }
+.composer[data-state="send"] .icon-send { display: block; }
+.composer[data-state="busy"] .composer-action { background: var(--accent); color: var(--accent-text); pointer-events: none; }
+.composer[data-state="busy"] .composer-spinner { display: block; width: 16px; height: 16px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; }
+.composer[data-state="listening"] .composer-action { background: var(--danger); color: #fff; animation: listening 1.4s ease-out infinite; }
+/* No speech recognition in this browser: only a send button. */
+.composer.no-voice .icon-mic { display: none; }
+.composer.no-voice .icon-send { display: block; }
+.composer.no-voice[data-state="idle"] .composer-action { opacity: .5; }
+@keyframes listening {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--danger) 45%, transparent); }
+  100% { box-shadow: 0 0 0 12px transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .composer[data-state="listening"] .composer-action { animation: none; }
+}
+
+/* What the form was read from, at the top of the editor. */
+.from-text { display: flex; align-items: flex-start; gap: 8px; margin: -4px 0 14px; color: var(--muted); font-size: .9rem; }
+.from-text svg { flex: none; width: 16px; height: 16px; margin-top: 2px; }

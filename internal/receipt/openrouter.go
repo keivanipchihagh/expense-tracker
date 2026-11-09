@@ -1,6 +1,6 @@
-// Package receipt reads an expense off a photo of a receipt with a vision
-// model on OpenRouter. The model's answer is a draft: the caller checks it
-// and the user confirms it before anything is saved.
+// Package receipt reads an expense off a photo of a receipt, or out of a
+// line of text, with a model on OpenRouter. The model's answer is a draft:
+// the caller checks it and the user confirms it before anything is saved.
 package receipt
 
 import (
@@ -21,10 +21,12 @@ const DefaultModel = "nvidia/nemotron-3.5-super-vl:free"
 
 const defaultBaseUrl = "https://openrouter.ai/api/v1"
 
-// Reading is what the model read off the image. Fields it couldn't read are
-// empty. Nothing here is validated yet.
+// Reading is what the model read off the image or text. Fields it couldn't
+// read are empty. Nothing here is validated yet.
 type Reading struct {
-	IsReceipt bool   `json:"is_receipt"`
+	// IsExpense is false when the image isn't a receipt, or the text doesn't
+	// describe money spent.
+	IsExpense bool   `json:"is_expense"`
 	Amount    string `json:"amount"`
 	Currency  string `json:"currency"`
 	Date      string `json:"date"`
@@ -34,12 +36,16 @@ type Reading struct {
 	Note      string `json:"note"`
 }
 
-// Scanner reads a receipt image.
+// Scanner reads expenses with a model.
 type Scanner interface {
 	// Scan sends the image (JPEG, PNG or WebP bytes of the given MIME type)
 	// to the model. today helps it resolve dates like "07.11.26". Errors
 	// are *Error with a message fit to show the user.
 	Scan(ctx context.Context, image []byte, mimeType string, today time.Time, categories []string) (Reading, error)
+	// ReadText reads an expense out of what the user typed or said, e.g.
+	// "12.50 lunch at Rewe yesterday". today resolves relative dates. Only
+	// what the text says is filled in.
+	ReadText(ctx context.Context, text string, today time.Time, categories []string) (Reading, error)
 }
 
 // Error is a failure to read the receipt, with a message for the user.
@@ -92,44 +98,76 @@ Rules:
 - currency is the ISO 4217 code of the total. Work it out from the symbol together with the address or country when that makes it clear (e.g. $ at a US address is USD, € is EUR); null if it can't be told.
 - date is YYYY-MM-DD and time is HH:MM (24-hour). Day-first formats like 07.11.2026 are the usual in Europe.
 - merchant is the name people use for the store or business, e.g. "Rewe" rather than "REWE Markt GmbH".
-- category: food is eating out (restaurants, cafes, takeaway, delivery); groceries is supermarkets and food shops; pick "other" if nothing fits.
+- category: food is eating out (restaurants, cafes, takeaway, delivery); groceries is supermarkets and food shops. Pick one only when the receipt makes it clear; otherwise null.
 - note says briefly what was bought, at most 60 characters, in the receipt's language or English.
-- is_receipt is false when the image is not a receipt, invoice or bill; then use null everywhere else and category "other".`
+- is_expense is false when the image is not a receipt, invoice or bill; then use null everywhere else.`
+
+const textPrompt = `You turn a short message about money someone spent into one expense. The message may be typed or dictated, in any language.
+Rules:
+- Use only what the message says. Use null for anything it doesn't say; never guess.
+- amount is the number spent, as digits with a dot and two decimals, e.g. "12,5" becomes 12.50.
+- currency is the ISO 4217 code only if the message names a currency or uses a symbol (euros, $, £); otherwise null.
+- date is YYYY-MM-DD, resolved from today for words like "yesterday" or "last Friday"; null if no day is mentioned.
+- time is HH:MM (24-hour) only if a clock time is said ("at 8pm"); otherwise null.
+- merchant is the shop, restaurant or company if one is named, written the way people write it.
+- category: pick one only when the message makes it clear (lunch, dinner, coffee out are food; a supermarket is groceries; a taxi is transport). Otherwise null.
+- note holds other details the user said that the fields don't cover (e.g. "with Sara", "birthday present"), in their words; null if none.
+- is_expense is false if the message doesn't describe money spent; then use null everywhere else.`
 
 func schema(categories []string) map[string]any {
+	// null in the enum lets the model leave the category out.
+	categoryEnum := make([]any, 0, len(categories)+1)
+	for _, c := range categories {
+		categoryEnum = append(categoryEnum, c)
+	}
+	categoryEnum = append(categoryEnum, nil)
 	nullable := func(desc string) map[string]any {
 		return map[string]any{"type": []string{"string", "null"}, "description": desc}
 	}
 	return map[string]any{
 		"type":                 "object",
 		"additionalProperties": false,
-		"required":             []string{"is_receipt", "amount", "currency", "date", "time", "merchant", "category", "note"},
+		"required":             []string{"is_expense", "amount", "currency", "date", "time", "merchant", "category", "note"},
 		"properties": map[string]any{
-			"is_receipt": map[string]any{"type": "boolean", "description": "false if the image is not a receipt, invoice or bill"},
+			"is_expense": map[string]any{"type": "boolean", "description": "false if there is no expense to read"},
 			"amount":     nullable("grand total paid, e.g. 12.50"),
 			"currency":   nullable("ISO 4217 code of the total, e.g. EUR"),
 			"date":       nullable("purchase date, YYYY-MM-DD"),
 			"time":       nullable("purchase time, HH:MM"),
 			"merchant":   nullable("store or business name"),
-			"category":   map[string]any{"type": "string", "enum": categories},
+			"category":   map[string]any{"type": []string{"string", "null"}, "enum": categoryEnum},
 			"note":       nullable("what was bought, at most 60 characters"),
 		},
 	}
 }
 
 func (o *OpenRouter) Scan(ctx context.Context, image []byte, mimeType string, today time.Time, categories []string) (Reading, error) {
+	return o.ask(ctx, systemPrompt, []any{
+		map[string]any{"type": "text", "text": "Today is " + today.Format("Monday, 2 January 2006") + ". Extract the expense from this image."},
+		map[string]any{"type": "image_url", "image_url": map[string]string{
+			"url": "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(image),
+		}},
+	}, categories)
+}
+
+func (o *OpenRouter) ReadText(ctx context.Context, text string, today time.Time, categories []string) (Reading, error) {
+	// The message is passed as data, after the date, so it can't rewrite the
+	// instructions; the schema limits what can come back either way.
+	msg, _ := json.Marshal(text)
+	return o.ask(ctx, textPrompt, []any{
+		map[string]any{"type": "text", "text": "Today is " + today.Format("Monday, 2 January 2006") + ". The message, as a JSON string: " + string(msg)},
+	}, categories)
+}
+
+// ask sends one request with a strict JSON schema and reads the answer.
+func (o *OpenRouter) ask(ctx context.Context, system string, content []any, categories []string) (Reading, error) {
 	body, err := json.Marshal(map[string]any{
 		"model":       o.model,
 		"temperature": 0,
 		"max_tokens":  4000,
 		"messages": []any{
-			map[string]any{"role": "system", "content": systemPrompt},
-			map[string]any{"role": "user", "content": []any{
-				map[string]any{"type": "text", "text": "Today is " + today.Format("Monday, 2 January 2006") + ". Extract the expense from this image."},
-				map[string]any{"type": "image_url", "image_url": map[string]string{
-					"url": "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(image),
-				}},
-			}},
+			map[string]any{"role": "system", "content": system},
+			map[string]any{"role": "user", "content": content},
 		},
 		"response_format": map[string]any{
 			"type":        "json_schema",
@@ -201,7 +239,8 @@ func parseReading(content string) (Reading, error) {
 		return Reading{}, &Error{Message: "The model's answer wasn't in the expected format. Try again.", Retry: true, err: fmt.Errorf("no JSON object in %q", truncate(content, 200))}
 	}
 	var r struct {
-		IsReceipt *bool   `json:"is_receipt"`
+		IsExpense *bool   `json:"is_expense"`
+		IsReceipt *bool   `json:"is_receipt"` // older wording, still accepted
 		Amount    *string `json:"amount"`
 		Currency  *string `json:"currency"`
 		Date      *string `json:"date"`
@@ -219,9 +258,13 @@ func parseReading(content string) (Reading, error) {
 		}
 		return strings.TrimSpace(*p)
 	}
+	isExpense := r.IsExpense
+	if isExpense == nil {
+		isExpense = r.IsReceipt
+	}
 	return Reading{
 		// Missing means the model didn't say it isn't one.
-		IsReceipt: r.IsReceipt == nil || *r.IsReceipt,
+		IsExpense: isExpense == nil || *isExpense,
 		Amount:    s(r.Amount),
 		Currency:  s(r.Currency),
 		Date:      s(r.Date),

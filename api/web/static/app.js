@@ -244,6 +244,140 @@
     }
   });
 
+  // The composer: type, say or photograph an expense. What the model reads
+  // opens in the new expense form for the user to finish and add.
+  var composer = document.querySelector("[data-composer]");
+  if (composer) {
+    var composerText = composer.querySelector("[data-composer-text]");
+    var composerAction = composer.querySelector("[data-composer-action]");
+    var composerPhoto = composer.querySelector("[data-composer-photo]");
+    var placeholder = composerText.placeholder;
+    var Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    var recognizer = null;
+    if (!Recognition) composer.classList.add("no-voice");
+
+    var labels = { idle: "Say an expense", send: "Send", listening: "Stop listening", busy: "Reading…" };
+    var setState = function (state) {
+      composer.dataset.state = state;
+      var label = state === "idle" && !Recognition ? "Send" : labels[state];
+      composerAction.setAttribute("aria-label", label);
+      composerAction.title = label;
+    };
+    var syncState = function () {
+      if (composer.dataset.state === "busy" || composer.dataset.state === "listening") return;
+      setState(composerText.value.trim() ? "send" : "idle");
+    };
+    // A short message in the field's placeholder, e.g. after an error.
+    var hint = function (text) {
+      composerText.placeholder = text;
+      setTimeout(function () {
+        composerText.placeholder = placeholder;
+      }, 4000);
+    };
+    // The list's range and filters, so the editor and the list stay in step.
+    var rangeValues = function () {
+      var values = {};
+      document.querySelectorAll("#range input").forEach(function (input) {
+        values[input.name] = input.value;
+      });
+      return values;
+    };
+
+    var sendText = function (text) {
+      setState("busy");
+      var range = rangeValues();
+      var body = new URLSearchParams({
+        text: text,
+        from: range.from || "",
+        to: range.to || "",
+        filter_category: range.category || "",
+        filter_merchant: range.merchant || "",
+        tz_offset: String(-new Date().getTimezoneOffset()),
+      });
+      fetch("/ui/expenses/text", { method: "POST", body: body, credentials: "same-origin", headers: { "HX-Request": "true" } })
+        .then(function (response) {
+          if (response.status === 401) {
+            window.location.href = "/login";
+            return;
+          }
+          return response.text().then(function (html) {
+            htmx.swap(document.getElementById("editor"), html, { swapStyle: "innerHTML" });
+            composerText.value = "";
+          });
+        })
+        .catch(function () {
+          hint("Couldn't send it. Check your connection.");
+        })
+        .finally(function () {
+          setState("idle");
+          syncState();
+        });
+    };
+
+    var listen = function () {
+      recognizer = new Recognition();
+      recognizer.lang = navigator.language || "en-US";
+      recognizer.interimResults = true;
+      recognizer.maxAlternatives = 1;
+      var heard = "";
+      recognizer.onresult = function (event) {
+        heard = Array.prototype.map.call(event.results, function (result) {
+          return result[0].transcript;
+        }).join(" ").trim();
+        composerText.value = heard;
+      };
+      recognizer.onerror = function (event) {
+        heard = "";
+        composerText.value = "";
+        if (event.error === "not-allowed" || event.error === "service-not-allowed") hint("Microphone access is blocked.");
+        else if (event.error === "no-speech") hint("Didn't catch that. Try again.");
+        else if (event.error !== "aborted") hint("Voice input isn't available right now.");
+      };
+      recognizer.onend = function () {
+        recognizer = null;
+        composerText.placeholder = placeholder;
+        if (heard) {
+          sendText(heard);
+        } else {
+          setState("idle");
+          syncState();
+        }
+      };
+      setState("listening");
+      composerText.placeholder = "Listening…";
+      recognizer.start();
+    };
+
+    composerText.addEventListener("input", syncState);
+    composer.addEventListener("submit", function (event) {
+      event.preventDefault();
+      var state = composer.dataset.state;
+      if (state === "listening") {
+        if (recognizer) recognizer.stop();
+      } else if (state !== "busy" && composerText.value.trim()) {
+        sendText(composerText.value.trim());
+      } else if (state !== "busy" && Recognition) {
+        listen();
+      } else {
+        composerText.focus();
+      }
+    });
+
+    // The camera opens the new expense form and scans the photo there.
+    composer.querySelector("[data-composer-camera]").addEventListener("click", function () {
+      composerPhoto.click();
+    });
+    composerPhoto.addEventListener("change", function () {
+      var file = composerPhoto.files[0];
+      composerPhoto.value = "";
+      if (!file) return;
+      htmx.ajax("GET", "/ui/expenses/new", { target: "#editor", swap: "innerHTML", values: rangeValues() }).then(function () {
+        scanReceipt(file);
+      });
+    });
+    setState("idle");
+  }
+
   // Confirmation dialogs: [data-dialog-open="id"] opens one, [data-dialog-close]
   // or a click on the backdrop closes it. A dialog rendered with an error
   // (data-show-on-load) opens straight away.

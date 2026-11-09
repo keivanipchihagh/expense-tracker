@@ -10,6 +10,7 @@ A self-hosted expense log you can talk to. Tell an AI agent "12.50 for lunch at 
 - **MCP server** for Claude, ChatGPT, Gemini and other agents: log, correct, look up and delete expenses
 - **Accounts**: sign up with email and password; each person sees only their own expenses, and can export all their data or delete their account
 - **Web UI**: list and filter expenses, quick add, your own categories, CSV/JSON export, light and dark theme
+- **Type, say or snap**: a floating bar on the expense list takes "12.50 lunch at Rewe yesterday" typed or spoken, or a receipt photo, and fills in only what it's sure of for you to finish
 - **Receipt scanning**: snap or upload a receipt and a vision model on [OpenRouter](https://openrouter.ai) fills in the expense for you to check, and the photo is kept with it (set `OPENROUTER_API_KEY`; the default model is free)
 - **Analysis**: totals against the previous period, category breakdown, spending over time, top merchants
 - **Built-in OAuth 2.1** for agents, and a REST API

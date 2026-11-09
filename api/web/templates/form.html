@@ -6,6 +6,9 @@
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
     </button>
   </header>
+  {{with .FromText}}
+  <p class="from-text"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/></svg><span>“{{.}}”</span></p>
+  {{end}}
   {{if and (not .Id) .ScanEnabled}}
   <div class="scan{{if .Scanned}} scanned{{end}}" data-scan>
     <input type="file" id="receipt-file" class="sr-only" accept="image/*" data-scan-input>
@@ -39,7 +42,8 @@
     <div class="fields">
       <label class="{{if index .Errors "category"}}invalid{{end}}">
         <span>Category</span>
-        <select name="category">
+        <select name="category" required>
+          {{if not .Values.Category}}<option value="" selected disabled>Choose a category</option>{{end}}
           {{range .Categories}}<option value="{{.}}" {{if eq . $.Values.Category}}selected{{end}}>{{title .}}</option>{{end}}
         </select>
         {{with index .Errors "category"}}<small class="field-error">{{.}}</small>{{end}}

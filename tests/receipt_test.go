@@ -76,7 +76,7 @@ func TestScan_FillsTheFormWithoutSaving(t *testing.T) {
 	c := browser(t)
 	signIn(t, s, c)
 	calls := withFakeOpenRouter(t, s, http.StatusOK,
-		`{"is_receipt":true,"amount":"10,91","currency":"USD","date":"2026-11-07","time":"18:42","merchant":"Rewe","category":"groceries","note":"Oat milk, bananas"}`)
+		`{"is_expense":true,"amount":"10,91","currency":"USD","date":"2026-11-07","time":"18:42","merchant":"Rewe","category":"groceries","note":"Oat milk, bananas"}`)
 
 	_, _, form := send(t, c, http.MethodGet, s.url+"/ui/expenses/new", nil, nil)
 	assert.Contains(t, form, `data-scan-input`, "the new expense form offers scanning")
@@ -113,7 +113,7 @@ func TestScan_Problems(t *testing.T) {
 	status, _ := scan(t, s, c, receiptPng, nil)
 	assert.Equal(t, http.StatusNotFound, status)
 
-	calls := withFakeOpenRouter(t, s, http.StatusOK, `{"is_receipt":false,"category":"other"}`)
+	calls := withFakeOpenRouter(t, s, http.StatusOK, `{"is_expense":false,"category":"other"}`)
 	status, page := scan(t, s, c, receiptPng, nil)
 	assert.Equal(t, http.StatusUnprocessableEntity, status)
 	assert.Contains(t, page, "doesn&#39;t look like a receipt")
@@ -142,7 +142,7 @@ func TestScan_Problems(t *testing.T) {
 
 func TestScan_NeedsSessionAndSameOrigin(t *testing.T) {
 	s := newTestServer(t)
-	calls := withFakeOpenRouter(t, s, http.StatusOK, `{"is_receipt":true}`)
+	calls := withFakeOpenRouter(t, s, http.StatusOK, `{"is_expense":true}`)
 
 	status, _ := scan(t, s, browser(t), receiptPng, nil)
 	assert.Equal(t, http.StatusSeeOther, status, "signed out")
@@ -158,7 +158,7 @@ func TestScan_FormCanBeAddedAfterwards(t *testing.T) {
 	s := newTestServer(t)
 	c := browser(t)
 	signIn(t, s, c)
-	withFakeOpenRouter(t, s, http.StatusOK, `{"is_receipt":true,"amount":"4.20","date":"2026-11-08","time":null,"merchant":"Bakery","category":"food","note":null}`)
+	withFakeOpenRouter(t, s, http.StatusOK, `{"is_expense":true,"amount":"4.20","date":"2026-11-08","time":null,"merchant":"Bakery","category":"food","note":null}`)
 	status, page := scan(t, s, c, receiptPng, nil)
 	require.Equal(t, http.StatusOK, status)
 	assert.Contains(t, page, `value="2026-11-08T12:00:00"`, "noon when the receipt has no time")

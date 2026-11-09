@@ -16,4 +16,19 @@
 <div id="results">
   {{template "results" .Results}}
 </div>
+
+{{if .Assistant}}
+<form class="composer" data-composer autocomplete="off" aria-label="Log an expense">
+  <input type="file" class="sr-only" accept="image/*" tabindex="-1" aria-hidden="true" data-composer-photo>
+  <button type="button" class="composer-icon" aria-label="Scan a receipt" title="Scan a receipt" data-composer-camera>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><path d="M12 16.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"/></svg>
+  </button>
+  <input type="text" name="text" class="composer-input" maxlength="500" placeholder="12.50 lunch at Rewe yesterday" aria-label="Describe an expense" enterkeyhint="send" data-composer-text>
+  <button type="submit" class="composer-action" aria-label="Send" title="Send" data-composer-action>
+    <svg class="icon-mic" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+    <svg class="icon-send" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+    <span class="composer-spinner" aria-hidden="true"></span>
+  </button>
+</form>
+{{end}}
 {{end}}
