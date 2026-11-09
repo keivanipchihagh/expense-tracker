@@ -25,6 +25,35 @@
     });
   }
 
+  function localDate(d) {
+    return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+  }
+
+  // Quick dates ("Today", "Yesterday", "2 days ago") set the date of the
+  // When field and keep its time. The button matching the date is pressed.
+  function syncQuickDates(root) {
+    root.querySelectorAll(".quick-dates").forEach(function (group) {
+      var input = group.closest("form").querySelector('input[name="occurred_local"]');
+      var date = input.value.slice(0, 10);
+      group.querySelectorAll("[data-days-ago]").forEach(function (button) {
+        var d = new Date();
+        d.setDate(d.getDate() - Number(button.dataset.daysAgo));
+        button.setAttribute("aria-pressed", String(localDate(d) === date));
+      });
+    });
+  }
+
+  function setDaysAgo(button) {
+    var form = button.closest("form");
+    var input = form.querySelector('input[name="occurred_local"]');
+    var now = new Date();
+    var time = input.value.slice(11) || pad(now.getHours()) + ":" + pad(now.getMinutes()) + ":" + pad(now.getSeconds());
+    var d = new Date();
+    d.setDate(d.getDate() - Number(button.dataset.daysAgo));
+    input.value = localDate(d) + "T" + time;
+    syncQuickDates(form);
+  }
+
   function closeEditor() {
     var editor = document.getElementById("editor");
     if (editor) editor.innerHTML = "";
@@ -32,9 +61,16 @@
 
   document.addEventListener("htmx:load", function (event) {
     fillTimeFields(event.detail.elt);
+    syncQuickDates(event.detail.elt);
+  });
+
+  document.addEventListener("input", function (event) {
+    if (event.target.name === "occurred_local") syncQuickDates(event.target.closest("form"));
   });
 
   document.addEventListener("click", function (event) {
+    var quick = event.target.closest("[data-days-ago]");
+    if (quick) setDaysAgo(quick);
     // The close buttons, or a click on the dimmed backdrop around the dialog.
     if (event.target.closest("[data-close-editor]") || event.target.id === "editor") {
       closeEditor();

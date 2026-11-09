@@ -29,11 +29,16 @@
         {{with index .Errors "category"}}<small class="field-error">{{.}}</small>{{end}}
       </label>
 
-      <label class="{{if index .Errors "occurred_at"}}invalid{{end}}">
-        <span>When</span>
-        <input type="datetime-local" name="occurred_local" step="1" value="{{.Values.OccurredLocal}}" required>
+      <div class="field {{if index .Errors "occurred_at"}}invalid{{end}}">
+        <label for="occurred-local">When</label>
+        <input id="occurred-local" type="datetime-local" name="occurred_local" step="1" value="{{.Values.OccurredLocal}}" required>
+        <div class="quick-dates" role="group" aria-label="Quick dates">
+          <button type="button" data-days-ago="0" aria-pressed="false">Today</button>
+          <button type="button" data-days-ago="1" aria-pressed="false">Yesterday</button>
+          <button type="button" data-days-ago="2" aria-pressed="false">2 days ago</button>
+        </div>
         {{with index .Errors "occurred_at"}}<small class="field-error">{{.}}</small>{{end}}
-      </label>
+      </div>
 
       <label class="wide {{if index .Errors "merchant"}}invalid{{end}}">
         <span>Merchant</span>

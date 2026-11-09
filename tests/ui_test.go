@@ -137,6 +137,10 @@ func TestUI_ExpenseLifecycle(t *testing.T) {
 	assert.Contains(t, form, `hx-post="/ui/expenses"`)
 	assert.Contains(t, form, `<span class="amount-symbol" aria-hidden="true">€</span>`, "the amount shows the display currency")
 	assert.NotContains(t, form, `name="currency"`, "there is no per-expense currency")
+	assert.Contains(t, form, `<label for="occurred-local">When</label>`)
+	assert.Contains(t, form, `<button type="button" data-days-ago="0" aria-pressed="false">Today</button>`)
+	assert.Contains(t, form, `<button type="button" data-days-ago="1" aria-pressed="false">Yesterday</button>`)
+	assert.Contains(t, form, `<button type="button" data-days-ago="2" aria-pressed="false">2 days ago</button>`)
 
 	// A rejected submission shows the form again with the problem
 	bad := url.Values{

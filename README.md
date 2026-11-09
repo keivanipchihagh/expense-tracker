@@ -36,7 +36,7 @@ Open `PUBLIC_URL` (by default http://localhost:8000) and sign in with `AUTH_PASS
 - A total with a breakdown by category
 - Export the expenses shown (same dates and filters) as CSV or JSON, from the **Export** menu in the filter row. CSV cells that start like a formula (`=`, `+`, `-`, `@`) get a leading `'` so spreadsheets treat them as text
 - Display currency (€, $ or £), picked next to **Add expense** and saved on the server. Amounts are plain numbers: switching changes the symbol only, nothing is converted
-- Add, edit and delete expenses; time and time zone default to your browser's
+- Add, edit and delete expenses; time and time zone default to your browser's, and **Today**, **Yesterday** and **2 days ago** set the date while keeping the time
 - **Analysis** page for this month, last month, 3, 6 or 12 months, or all time, optionally without housing or for one category: totals with the change against the previous period, spending compared day by day with the previous period, a category breakdown, spending per day/week/month with its average, and top merchants
 - **Apps** page: see which apps (Claude, ChatGPT, …) are signed in through OAuth and revoke their access
 - Light/dark switch in the top bar; follows your system theme until you pick one (remembered in the browser)

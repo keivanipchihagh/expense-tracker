@@ -396,8 +396,14 @@ input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible
 .amount-field:focus-within { border-color: var(--text); box-shadow: 0 0 0 3px color-mix(in srgb, var(--text) 12%, transparent); }
 
 .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 16px; }
-.fields label { display: flex; flex-direction: column; gap: 6px; }
-.fields label > span { color: var(--muted); font-size: .85rem; }
+.fields label, .fields .field { display: flex; flex-direction: column; gap: 6px; }
+.fields label > span, .fields .field > label { color: var(--muted); font-size: .85rem; }
+
+/* Quick dates under the When field: they set the date, keeping the time. */
+.quick-dates { display: flex; flex-wrap: wrap; gap: 4px; }
+.quick-dates button { height: 26px; padding: 0 8px; border-color: var(--border); background: transparent; color: var(--muted); font-size: .78rem; white-space: nowrap; }
+.quick-dates button:hover { color: var(--text); background: var(--subtle); }
+.quick-dates button[aria-pressed="true"] { border-color: var(--text); color: var(--text); font-weight: 550; }
 .fields .wide { grid-column: 1 / -1; }
 
 .invalid input, .invalid select, .invalid textarea, .amount-field.invalid { border-color: var(--danger); }
